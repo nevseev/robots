@@ -1,0 +1,42 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MartianRobots.Abstractions", "MartianRobots.Abstractions\MartianRobots.Abstractions.csproj", "{CB47E619-1C14-023D-2102-ADEF239EC449}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MartianRobots.Core", "MartianRobots.Core\MartianRobots.Core.csproj", "{CB47E619-1C14-023D-2102-ADEF239EC450}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MartianRobots.Console", "MartianRobots.Console\MartianRobots.Console.csproj", "{CB47E619-1C14-023D-2102-ADEF239EC451}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MartianRobots.Tests", "MartianRobots.Tests\MartianRobots.Tests.csproj", "{CB47E619-1C14-023D-2102-ADEF239EC452}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{CB47E619-1C14-023D-2102-ADEF239EC449}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC449}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC449}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC449}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC450}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC450}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC450}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC450}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC451}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC451}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC451}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC451}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC452}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC452}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC452}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CB47E619-1C14-023D-2102-ADEF239EC452}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {804C64FB-7DA9-4262-BE64-D26FCD9F3CD5}
+	EndGlobalSection
+EndGlobal
