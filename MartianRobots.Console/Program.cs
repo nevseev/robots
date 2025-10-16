@@ -4,13 +4,14 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Extensions.Hosting;
+using MartianRobots.Console.Communication;
 
 namespace MartianRobots.Console;
 
 internal static class Program
 {
     [ExcludeFromCodeCoverage]
-    private static int Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         // Configure Serilog
         Log.Logger = new LoggerConfiguration()
@@ -23,19 +24,50 @@ internal static class Program
         var host = CreateHostBuilder(args).Build();
         
         var logger = host.Services.GetRequiredService<ILogger<StartupLogger>>();
-        logger.LogInformation("Mars Robot Simulation starting. Args: [{Args}]", string.Join(", ", args));
-
+        
         try
         {
-            var application = host.Services.GetRequiredService<Application>();
-            var result = application.Run();
-            
-            logger.LogInformation("Mars Robot Simulation completed with exit code: {ExitCode}", result);
-            return result;
+            // Check if this is a communication demo request
+            if (args.Contains("--communication-demo") || args.Contains("--comm-demo"))
+            {
+                logger.LogInformation("Starting Mars Robot Communication System Demo");
+                
+                var demo = host.Services.GetRequiredService<RobotCommunicationDemo>();
+                var cts = new CancellationTokenSource();
+                
+                // Handle Ctrl+C gracefully
+                System.Console.CancelKeyPress += (_, e) =>
+                {
+                    e.Cancel = true;
+                    cts.Cancel();
+                    logger.LogInformation("Cancellation requested by user");
+                };
+
+                await demo.RunDemoAsync(cts.Token);
+                
+                logger.LogInformation("Mars Robot Communication Demo completed successfully");
+                return 0;
+            }
+            else
+            {
+                // Run original simulation
+                logger.LogInformation("Mars Robot Simulation starting. Args: [{Args}]", string.Join(", ", args));
+                
+                var application = host.Services.GetRequiredService<Application>();
+                var result = application.Run();
+                
+                logger.LogInformation("Mars Robot Simulation completed with exit code: {ExitCode}", result);
+                return result;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation("Operation was cancelled by user");
+            return 0;
         }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "Unhandled exception in Mars Robot Simulation");
+            logger.LogCritical(ex, "Unhandled exception in Mars Robot application");
             return 1;
         }
         finally
@@ -50,7 +82,11 @@ internal static class Program
             .UseSerilog()
             .ConfigureServices((context, services) =>
             {
+                // Original simulation services
                 services.AddSingleton<Application>();
+                
+                // Robot communication services
+                services.AddRobotCommunication();
             });
 }
 

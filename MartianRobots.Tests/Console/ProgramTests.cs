@@ -2,10 +2,14 @@ using System.Reflection;
 
 namespace MartianRobots.Tests.Console;
 
+/// <summary>
+/// Tests for the Program class that need to run in isolation due to console redirection
+/// </summary>
+[Collection("ProgramTests")] // Ensure these tests don't run in parallel
 public class ProgramTests
 {
     [Fact]
-    public void Main_ShouldCreateApplicationAndCallRun()
+    public async Task Main_ShouldCreateApplicationAndCallRun()
     {
         // Arrange - Redirect console streams to capture behavior
         var originalIn = System.Console.In;
@@ -29,8 +33,9 @@ public class ProgramTests
             var mainMethod = programType!.GetMethod("Main", BindingFlags.Static | BindingFlags.NonPublic);
             mainMethod.Should().NotBeNull("Main method should exist");
 
-            // Act - Call Main method
-            var result = mainMethod!.Invoke(null, new object[] { new string[0] });
+            // Act - Call Main method and await the Task
+            var task = (Task<int>)mainMethod!.Invoke(null, new object[] { new string[0] })!;
+            var result = await task;
 
             // Assert
             result.Should().Be(0);
@@ -42,11 +47,14 @@ public class ProgramTests
             System.Console.SetIn(originalIn);
             System.Console.SetOut(originalOut);
             System.Console.SetError(originalError);
+            
+            // Give time for any background tasks to complete
+            await Task.Delay(100);
         }
     }
 
     [Fact]
-    public void Main_WithInvalidInput_ShouldReturnErrorCode()
+    public async Task Main_WithInvalidInput_ShouldReturnErrorCode()
     {
         // Arrange
         var originalIn = System.Console.In;
@@ -67,8 +75,9 @@ public class ProgramTests
             var programType = Type.GetType("MartianRobots.Console.Program, MartianRobots.Console");
             var mainMethod = programType!.GetMethod("Main", BindingFlags.Static | BindingFlags.NonPublic);
 
-            // Act
-            var result = mainMethod!.Invoke(null, new object[] { new string[0] });
+            // Act - Call Main method and await the Task
+            var task = (Task<int>)mainMethod!.Invoke(null, new object[] { new string[0] })!;
+            var result = await task;
 
             // Assert
             result.Should().Be(1);
@@ -80,6 +89,9 @@ public class ProgramTests
             System.Console.SetIn(originalIn);
             System.Console.SetOut(originalOut);
             System.Console.SetError(originalError);
+            
+            // Give time for any background tasks to complete
+            await Task.Delay(100);
         }
     }
 }
