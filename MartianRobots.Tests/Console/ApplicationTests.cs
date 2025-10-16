@@ -1,10 +1,16 @@
 using MartianRobots.Console;
 using System.Text;
+using Microsoft.Extensions.Logging;
+using Moq;
 
 namespace MartianRobots.Tests.Console;
 
 public class ApplicationTests
 {
+    private static ILogger<Application> CreateMockLogger()
+    {
+        return new Mock<ILogger<Application>>().Object;
+    }
     [Fact]
     public void Constructor_WithValidStreams_ShouldNotThrow()
     {
@@ -13,14 +19,14 @@ public class ApplicationTests
         using var output = new StringWriter();
         using var error = new StringWriter();
 
-        var action = () => new Application(input, output, error);
+        var action = () => new Application(input, output, error, CreateMockLogger());
         action.Should().NotThrow();
     }
 
     [Fact]
     public void Constructor_Default_ShouldNotThrow()
     {
-        var action = () => new Application();
+        var action = () => new Application(System.Console.In, System.Console.Out, System.Console.Error, CreateMockLogger());
         action.Should().NotThrow();
     }
 
@@ -31,7 +37,7 @@ public class ApplicationTests
         using var output = new StringWriter();
         using var error = new StringWriter();
 
-        var action = () => new Application(null!, output, error);
+        var action = () => new Application(null!, output, error, CreateMockLogger());
         action.Should().Throw<ArgumentNullException>()
             .WithParameterName("input");
     }
@@ -43,7 +49,7 @@ public class ApplicationTests
         using var input = new StringReader("");
         using var error = new StringWriter();
 
-        var action = () => new Application(input, null!, error);
+        var action = () => new Application(input, null!, error, CreateMockLogger());
         action.Should().Throw<ArgumentNullException>()
             .WithParameterName("output");
     }
@@ -55,7 +61,7 @@ public class ApplicationTests
         using var input = new StringReader("");
         using var output = new StringWriter();
 
-        var action = () => new Application(input, output, null!);
+        var action = () => new Application(input, output, null!, CreateMockLogger());
         action.Should().Throw<ArgumentNullException>()
             .WithParameterName("error");
     }
@@ -68,7 +74,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -84,7 +90,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         application.Run();
 
@@ -102,7 +108,7 @@ public class ApplicationTests
         using var input = new StringReader("");
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -119,7 +125,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -136,7 +142,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -153,7 +159,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -170,7 +176,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -187,7 +193,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         application.Run();
 
@@ -204,7 +210,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         application.Run();
 
@@ -223,7 +229,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         application.Run();
 
@@ -240,7 +246,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         application.Run();
 
@@ -258,7 +264,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -275,7 +281,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -292,7 +298,7 @@ public class ApplicationTests
         using var input = new StringReader(inputText);
         using var output = new StringWriter();
         using var error = new StringWriter();
-        var application = new Application(input, output, error);
+        var application = new Application(input, output, error, CreateMockLogger());
 
         var result = application.Run();
 
@@ -348,7 +354,7 @@ public class TestableApplication : Application
     public bool WriteOutputCalled { get; private set; }
 
     public TestableApplication(TextReader input, TextWriter output, TextWriter error) 
-        : base(input, output, error)
+        : base(input, output, error, new Mock<ILogger<Application>>().Object)
     {
     }
 
@@ -377,7 +383,7 @@ public class TestableApplication : Application
 public class ExceptionThrowingApplication : Application
 {
     public ExceptionThrowingApplication(TextReader input, TextWriter output, TextWriter error) 
-        : base(input, output, error)
+        : base(input, output, error, new Mock<ILogger<Application>>().Object)
     {
     }
 

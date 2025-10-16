@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace MartianRobots.Core.Parsing;
 
 /// <summary>
@@ -12,13 +14,29 @@ public static class InputParser
     /// <returns>MarsGrid instance</returns>
     public static MarsGrid ParseGrid(string gridLine)
     {
+        return ParseGrid(gridLine, null);
+    }
+
+    /// <summary>
+    /// Parses grid dimensions from input line with optional logging
+    /// </summary>
+    /// <param name="gridLine">Line containing grid dimensions</param>
+    /// <param name="logger">Optional logger for diagnostics</param>
+    /// <returns>MarsGrid instance</returns>
+    public static MarsGrid ParseGrid(string gridLine, ILogger? logger)
+    {
+        logger?.LogDebug("Parsing grid from line: {GridLine}", gridLine);
+        
         Validation.InputValidator.ValidateGridLine(gridLine);
         
         var gridParts = gridLine.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var maxX = int.Parse(gridParts[0]);
         var maxY = int.Parse(gridParts[1]);
 
-        return new MarsGrid(maxX, maxY);
+        var grid = new MarsGrid(maxX, maxY);
+        logger?.LogInformation("Successfully parsed grid with dimensions {MaxX}x{MaxY}", maxX, maxY);
+        
+        return grid;
     }
 
     /// <summary>
@@ -28,6 +46,19 @@ public static class InputParser
     /// <returns>Robot instance</returns>
     public static Robot ParseRobot(string positionLine)
     {
+        return ParseRobot(positionLine, null);
+    }
+
+    /// <summary>
+    /// Parses robot from position line with optional logging
+    /// </summary>
+    /// <param name="positionLine">Line containing robot position and orientation</param>
+    /// <param name="logger">Optional logger for diagnostics</param>
+    /// <returns>Robot instance</returns>
+    public static Robot ParseRobot(string positionLine, ILogger? logger)
+    {
+        logger?.LogDebug("Parsing robot from position line: {PositionLine}", positionLine);
+        
         Validation.InputValidator.ValidateRobotPosition(positionLine);
         
         var parts = positionLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -38,6 +69,10 @@ public static class InputParser
         var position = new Position(x, y);
         var orientation = OrientationExtensions.FromChar(orientationChar);
 
-        return new Robot(position, orientation);
+        var robot = new Robot(position, orientation);
+        logger?.LogInformation("Successfully parsed robot at position {Position} facing {Orientation}", 
+            position, orientation);
+        
+        return robot;
     }
 }
