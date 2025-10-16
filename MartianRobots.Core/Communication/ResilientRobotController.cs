@@ -1,15 +1,10 @@
-using Microsoft.Extensions.Resilience;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Polly;
-using Polly.Retry;
-using Polly.CircuitBreaker;
-using Polly.Timeout;
 
 namespace MartianRobots.Core.Communication;
 
 /// <summary>
-/// A resilient wrapper around IRobotCommunicationService that adds circuit breaker and retry capabilities
+/// A resilient wrapper around IRobotCommunicationService that adds retry capabilities
 /// This controller provides additional resilience for critical robot operations
 /// </summary>
 public class ResilientRobotController : IResilientRobotController
@@ -17,9 +12,6 @@ public class ResilientRobotController : IResilientRobotController
     private readonly IRobotCommunicationService _communicationService;
     private readonly ILogger<ResilientRobotController> _logger;
     private readonly RobotCommunicationOptions _options;
-    private readonly ResiliencePipeline _connectionPipeline;
-    private readonly ResiliencePipeline _commandPipeline;
-    private readonly ResiliencePipeline _queryPipeline;
     private bool _disposed;
 
     public ResilientRobotController(
@@ -30,104 +22,55 @@ public class ResilientRobotController : IResilientRobotController
         _communicationService = communicationService ?? throw new ArgumentNullException(nameof(communicationService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options.Value ?? throw new ArgumentNullException(nameof(options));
-
-        // Build resilience pipelines
-        _connectionPipeline = BuildConnectionPipeline();
-        _commandPipeline = BuildCommandPipeline();
-        _queryPipeline = BuildQueryPipeline();
     }
 
-    private ResiliencePipeline BuildConnectionPipeline()
+    /// <summary>
+    /// Executes an operation with retry logic
+    /// </summary>
+    private async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> operation, string operationName, CancellationToken cancellationToken = default)
     {
-        return new ResiliencePipelineBuilder()
-            .AddRetry(new RetryStrategyOptions
-            {
-                MaxRetryAttempts = _options.MaxRetryAttempts,
-                DelayGenerator = static args => new ValueTask<TimeSpan?>(
-                    TimeSpan.FromMilliseconds(Math.Pow(2, args.AttemptNumber) * 1000)), // Exponential backoff
-                OnRetry = args =>
-                {
-                    _logger.LogWarning("Connection attempt {AttemptNumber} failed, retrying in {Delay}ms: {Exception}",
-                        args.AttemptNumber + 1, args.RetryDelay.TotalMilliseconds, args.Outcome.Exception?.Message);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddCircuitBreaker(new CircuitBreakerStrategyOptions
-            {
-                FailureRatio = 0.5,
-                MinimumThroughput = _options.CircuitBreakerMinimumThroughput,
-                SamplingDuration = _options.CircuitBreakerSamplingDuration,
-                BreakDuration = TimeSpan.FromSeconds(30),
-                OnOpened = args =>
-                {
-                    _logger.LogError("Connection circuit breaker opened: {Exception}", args.Outcome.Exception?.Message);
-                    return ValueTask.CompletedTask;
-                },
-                OnClosed = args =>
-                {
-                    _logger.LogInformation("Connection circuit breaker closed");
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(_options.CommandTimeout)
-            .Build();
-    }
+        var maxAttempts = _options.MaxRetryAttempts + 1; // +1 for initial attempt
+        Exception lastException = null!;
 
-    private ResiliencePipeline BuildCommandPipeline()
-    {
-        return new ResiliencePipelineBuilder()
-            .AddRetry(new RetryStrategyOptions
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
             {
-                MaxRetryAttempts = _options.MaxRetryAttempts,
-                DelayGenerator = static args => new ValueTask<TimeSpan?>(
-                    TimeSpan.FromMilliseconds(Math.Pow(2, args.AttemptNumber) * 500)), // Faster retry for commands
-                ShouldHandle = new PredicateBuilder().Handle<Exception>(ex => 
-                    ex is not RobotCommandException and not TimeoutException), // Don't retry business logic failures
-                OnRetry = args =>
+                _logger.LogDebug("Executing {OperationName}, attempt {Attempt}/{MaxAttempts}", operationName, attempt, maxAttempts);
+                
+                var result = await operation();
+                
+                if (attempt > 1)
                 {
-                    _logger.LogWarning("Command attempt {AttemptNumber} failed, retrying in {Delay}ms: {Exception}",
-                        args.AttemptNumber + 1, args.RetryDelay.TotalMilliseconds, args.Outcome.Exception?.Message);
-                    return ValueTask.CompletedTask;
+                    _logger.LogInformation("Successfully executed {OperationName} on attempt {Attempt}", operationName, attempt);
                 }
-            })
-            .AddCircuitBreaker(new CircuitBreakerStrategyOptions
+                
+                return result;
+            }
+            catch (Exception ex) when (attempt < maxAttempts && 
+                                        ex is not TimeoutException && 
+                                        ex is not OperationCanceledException &&
+                                        ex is not RobotCommandException)
             {
-                FailureRatio = 0.6,
-                MinimumThroughput = _options.CircuitBreakerMinimumThroughput,
-                SamplingDuration = _options.CircuitBreakerSamplingDuration,
-                BreakDuration = TimeSpan.FromSeconds(15),
-                OnOpened = args =>
-                {
-                    _logger.LogError("Command circuit breaker opened: {Exception}", args.Outcome.Exception?.Message);
-                    return ValueTask.CompletedTask;
-                },
-                OnClosed = args =>
-                {
-                    _logger.LogInformation("Command circuit breaker closed");
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(_options.CommandTimeout)
-            .Build();
-    }
+                lastException = ex;
+                var delay = TimeSpan.FromMilliseconds(Math.Pow(2, attempt - 1) * 1000); // Exponential backoff
+                
+                _logger.LogWarning("Attempt {Attempt} failed for {OperationName}, retrying in {Delay}ms: {Exception}",
+                    attempt, operationName, delay.TotalMilliseconds, ex.Message);
+                
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                break;
+            }
+        }
 
-    private ResiliencePipeline BuildQueryPipeline()
-    {
-        return new ResiliencePipelineBuilder()
-            .AddRetry(new RetryStrategyOptions
-            {
-                MaxRetryAttempts = 2, // Fewer retries for queries
-                DelayGenerator = static args => new ValueTask<TimeSpan?>(
-                    TimeSpan.FromMilliseconds(args.AttemptNumber * 200)),
-                OnRetry = args =>
-                {
-                    _logger.LogDebug("Query attempt {AttemptNumber} failed, retrying: {Exception}",
-                        args.AttemptNumber + 1, args.Outcome.Exception?.Message);
-                    return ValueTask.CompletedTask;
-                }
-            })
-            .AddTimeout(TimeSpan.FromSeconds(5)) // Shorter timeout for queries
-            .Build();
+        _logger.LogError("All {MaxAttempts} attempts failed for {OperationName}: {Exception}",
+            maxAttempts, operationName, lastException?.Message);
+        
+        throw lastException ?? new InvalidOperationException($"Operation {operationName} failed without exception details");
     }
 
     /// <summary>
@@ -135,10 +78,9 @@ public class ResilientRobotController : IResilientRobotController
     /// </summary>
     public async Task<bool> ConnectRobotAsync(string robotId, Position initialPosition, Orientation initialOrientation, CancellationToken cancellationToken = default)
     {
-        return await _connectionPipeline.ExecuteAsync(async (context) =>
+        return await ExecuteWithRetryAsync(async () =>
         {
-            _logger.LogDebug("Attempting resilient connection to robot {RobotId}",
-                robotId);
+            _logger.LogDebug("Attempting resilient connection to robot {RobotId}", robotId);
 
             var connected = await _communicationService.ConnectToRobotAsync(robotId, initialPosition, initialOrientation, cancellationToken);
             
@@ -149,17 +91,17 @@ public class ResilientRobotController : IResilientRobotController
 
             _logger.LogInformation("Successfully established resilient connection to robot {RobotId}", robotId);
             return connected;
-        }, cancellationToken);
+        }, $"ConnectRobot({robotId})", cancellationToken);
     }
 
     /// <summary>
-    /// Sends a command to a robot with full resilience (retry + circuit breaker)
+    /// Sends a command to a robot with full resilience (retry)
     /// </summary>
     public async Task<CommandResponse> SendCommandWithResilienceAsync(string robotId, char instruction, CancellationToken cancellationToken = default)
     {
         try
         {
-            return await _commandPipeline.ExecuteAsync(async (context) =>
+            return await ExecuteWithRetryAsync(async () =>
             {
                 _logger.LogDebug("Sending resilient command {Instruction} to robot {RobotId}",
                     instruction, robotId);
@@ -187,9 +129,9 @@ public class ResilientRobotController : IResilientRobotController
                     instruction, robotId);
 
                 return response;
-            }, cancellationToken);
+            }, $"SendCommand({robotId}, {instruction})", cancellationToken);
         }
-        catch (Exception ex) when (ex is not RobotCommandException and not TimeoutException)
+        catch (Exception ex) when (ex is not RobotCommandException and not TimeoutException and not OperationCanceledException)
         {
             // Wrap any other exceptions in RobotCommandException for consistent handling
             throw new RobotCommandException($"Unexpected error executing command {instruction} on robot {robotId}: {ex.Message}", ex);
@@ -272,7 +214,7 @@ public class ResilientRobotController : IResilientRobotController
     /// </summary>
     public async Task<RobotInstance?> GetRobotStateAsync(string robotId, CancellationToken cancellationToken = default)
     {
-        return await _queryPipeline.ExecuteAsync(async (context) =>
+        return await ExecuteWithRetryAsync(async () =>
         {
             var robot = await _communicationService.GetRobotStateAsync(robotId, cancellationToken);
             
@@ -282,7 +224,7 @@ public class ResilientRobotController : IResilientRobotController
             }
 
             return robot;
-        }, cancellationToken);
+        }, $"GetRobotState({robotId})", cancellationToken);
     }
 
     /// <summary>
@@ -292,10 +234,10 @@ public class ResilientRobotController : IResilientRobotController
     {
         try
         {
-            return await _queryPipeline.ExecuteAsync(async (context) =>
+            return await ExecuteWithRetryAsync(async () =>
             {
                 return await _communicationService.PingRobotAsync(robotId, cancellationToken);
-            }, cancellationToken);
+            }, $"HealthCheck({robotId})", cancellationToken);
         }
         catch (Exception ex)
         {

@@ -2,9 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using MartianRobots.Abstractions.Models;
 using MartianRobots.Core.Communication;
-using Xunit;
 
 namespace MartianRobots.Tests.Integration.Communication;
 

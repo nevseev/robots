@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
-using Serilog.Extensions.Hosting;
 using MartianRobots.Console.Communication;
 
 namespace MartianRobots.Console;

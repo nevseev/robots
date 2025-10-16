@@ -1,5 +1,3 @@
-using MartianRobots.Abstractions.Models;
-
 namespace MartianRobots.Core.Communication;
 
 /// <summary>

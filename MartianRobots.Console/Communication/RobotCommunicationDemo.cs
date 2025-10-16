@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MartianRobots.Core.Communication;
 using MartianRobots.Abstractions.Models;
@@ -9,16 +8,11 @@ namespace MartianRobots.Console.Communication;
 /// <summary>
 /// Demonstration of real-time robot communication with resilience patterns
 /// </summary>
-public class RobotCommunicationDemo
+public class RobotCommunicationDemo(
+    IServiceProvider serviceProvider, ILogger<RobotCommunicationDemo> logger)
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ILogger<RobotCommunicationDemo> _logger;
-
-    public RobotCommunicationDemo(IServiceProvider serviceProvider, ILogger<RobotCommunicationDemo> logger)
-    {
-        _serviceProvider = serviceProvider;
-        _logger = logger;
-    }
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private readonly ILogger<RobotCommunicationDemo> _logger = logger;
 
     /// <summary>
     /// Runs the robot communication demonstration
@@ -65,16 +59,16 @@ public class RobotCommunicationDemo
                 
                 if (connected)
                 {
-                    _logger.LogInformation("✅ Successfully connected to robot {RobotId}", robot.Id);
+                    _logger.LogInformation("Successfully connected to robot {RobotId}", robot.Id);
                 }
                 else
                 {
-                    _logger.LogWarning("❌ Failed to connect to robot {RobotId}", robot.Id);
+                    _logger.LogWarning("Failed to connect to robot {RobotId}", robot.Id);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "💥 Exception connecting to robot {RobotId}", robot.Id);
+                _logger.LogError(ex, "Exception connecting to robot {RobotId}", robot.Id);
             }
 
             // Small delay between connections
@@ -99,26 +93,26 @@ public class RobotCommunicationDemo
                 switch (response.Status)
                 {
                     case CommandStatus.Executed:
-                        _logger.LogInformation("✅ Command executed successfully. Robot at ({X}, {Y}) facing {Orientation}", 
+                        _logger.LogInformation("Command executed successfully. Robot at ({X}, {Y}) facing {Orientation}", 
                             response.NewPosition?.X, response.NewPosition?.Y, response.NewOrientation);
                         break;
                     case CommandStatus.Failed:
-                        _logger.LogWarning("❌ Command failed: {Error}", response.ErrorMessage);
+                        _logger.LogWarning("Command failed: {Error}", response.ErrorMessage);
                         break;
                     case CommandStatus.TimedOut:
-                        _logger.LogWarning("⏰ Command timed out");
+                        _logger.LogWarning("Command timed out");
                         break;
                 }
 
                 if (response.IsLost)
                 {
-                    _logger.LogWarning("🔴 Robot {RobotId} is lost!", robotId);
+                    _logger.LogWarning("Robot {RobotId} is lost!", robotId);
                     break;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "💥 Exception sending command '{Command}' to robot {RobotId}", command, robotId);
+                _logger.LogError(ex, "Exception sending command '{Command}' to robot {RobotId}", command, robotId);
             }
 
             // Small delay between commands
@@ -141,24 +135,24 @@ public class RobotCommunicationDemo
 
                 if (isHealthy)
                 {
-                    _logger.LogInformation("✅ Robot {RobotId} is healthy", robotId);
+                    _logger.LogInformation("Robot {RobotId} is healthy", robotId);
                     
                     // Get robot state
                     var robotState = await controller.GetRobotStateAsync(robotId, cancellationToken);
                     if (robotState != null)
                     {
-                        _logger.LogInformation("📍 Robot {RobotId} status: {Status}, Position: ({X}, {Y}), Orientation: {Orientation}", 
+                        _logger.LogInformation("Robot {RobotId} status: {Status}, Position: ({X}, {Y}), Orientation: {Orientation}", 
                             robotId, robotState.ConnectionState, robotState.Position.X, robotState.Position.Y, robotState.Orientation);
                     }
                 }
                 else
                 {
-                    _logger.LogWarning("❌ Robot {RobotId} is not responding", robotId);
+                    _logger.LogWarning("Robot {RobotId} is not responding", robotId);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "💥 Exception checking health of robot {RobotId}", robotId);
+                _logger.LogError(ex, "Exception checking health of robot {RobotId}", robotId);
             }
 
             await Task.Delay(500, cancellationToken);
@@ -191,19 +185,19 @@ public class RobotCommunicationDemo
                 var lastSuccessful = responses.LastOrDefault(r => r.Status == CommandStatus.Executed);
                 if (lastSuccessful?.NewPosition != null)
                 {
-                    _logger.LogInformation("📍 Final position: ({X}, {Y}) facing {Orientation}",
+                    _logger.LogInformation("Final position: ({X}, {Y}) facing {Orientation}",
                         lastSuccessful.NewPosition.Value.X, lastSuccessful.NewPosition.Value.Y, lastSuccessful.NewOrientation);
                 }
 
                 // Check if robot was lost
                 if (responses.Any(r => r.IsLost))
                 {
-                    _logger.LogWarning("🔴 Robot {RobotId} was lost during sequence execution", robotId);
+                    _logger.LogWarning("Robot {RobotId} was lost during sequence execution", robotId);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "💥 Exception executing instruction sequence on robot {RobotId}", robotId);
+                _logger.LogError(ex, "Exception executing instruction sequence on robot {RobotId}", robotId);
             }
 
             _logger.LogInformation(""); // Empty line for readability

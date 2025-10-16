@@ -1,8 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using MartianRobots.Abstractions.Models;
 using MartianRobots.Core.Communication;
-using Xunit;
 
 namespace MartianRobots.Tests.Core.Communication;
 

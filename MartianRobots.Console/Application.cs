@@ -6,23 +6,15 @@ namespace MartianRobots.Console;
 /// <summary>
 /// Main application logic for the Mars Robot simulation console app
 /// </summary>
-public class Application
+public class Application(TextReader input, TextWriter output, TextWriter error, ILogger<Application> logger)
 {
-    private readonly TextReader _input;
-    private readonly TextWriter _output;
-    private readonly TextWriter _error;
-    private readonly ILogger<Application> _logger;
+    private readonly TextReader _input = input ?? throw new ArgumentNullException(nameof(input));
+    private readonly TextWriter _output = output ?? throw new ArgumentNullException(nameof(output));
+    private readonly TextWriter _error = error ?? throw new ArgumentNullException(nameof(error));
+    private readonly ILogger<Application> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     public Application(ILogger<Application> logger) : this(System.Console.In, System.Console.Out, System.Console.Error, logger)
     {
-    }
-
-    public Application(TextReader input, TextWriter output, TextWriter error, ILogger<Application> logger)
-    {
-        _input = input ?? throw new ArgumentNullException(nameof(input));
-        _output = output ?? throw new ArgumentNullException(nameof(output));
-        _error = error ?? throw new ArgumentNullException(nameof(error));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -83,6 +75,10 @@ public class Application
         
         while ((line = _input.ReadLine()) is not null)
         {
+            // Allow exit on empty line or specific command (optional)
+            if (string.IsNullOrWhiteSpace(line) && inputLines.Count > 0)
+                break;
+                
             lineNumber++;
             inputLines.Add(line);
             _logger.LogTrace("Read line {LineNumber}: {Line}", lineNumber, line);

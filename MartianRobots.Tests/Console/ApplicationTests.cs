@@ -1,7 +1,5 @@
 using MartianRobots.Console;
-using System.Text;
 using Microsoft.Extensions.Logging;
-using Moq;
 
 namespace MartianRobots.Tests.Console;
 
