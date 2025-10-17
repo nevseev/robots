@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MartianRobots.Core.Communication;
+using MartianRobots.Tests.Mocks;
 
 namespace MartianRobots.Tests.Core.Communication;
 
@@ -10,15 +11,18 @@ public class ResilientRobotControllerTests : IDisposable
 {
     private readonly ServiceProvider _serviceProvider;
     private readonly Mock<IRobotCommunicationService> _mockCommunicationService;
+    private readonly MockDelayService _mockDelayService;
     private readonly ResilientRobotController _controller;
 
     public ResilientRobotControllerTests()
     {
         _mockCommunicationService = new Mock<IRobotCommunicationService>();
+        _mockDelayService = new MockDelayService();
         
         var services = new ServiceCollection();
         services.AddResilienceEnricher();
         services.AddSingleton(_mockCommunicationService.Object);
+        services.AddSingleton<IDelayService>(_mockDelayService);
         services.AddSingleton<ILogger<ResilientRobotController>>(NullLogger<ResilientRobotController>.Instance);
         
         _serviceProvider = services.BuildServiceProvider();
@@ -37,7 +41,8 @@ public class ResilientRobotControllerTests : IDisposable
         _controller = new ResilientRobotController(
             _mockCommunicationService.Object,
             NullLogger<ResilientRobotController>.Instance,
-            options);
+            options,
+            _mockDelayService);
     }
 
     [Fact]
@@ -513,7 +518,7 @@ public class ResilientRobotControllerTests : IDisposable
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => 
-            new ResilientRobotController(null!, NullLogger<ResilientRobotController>.Instance, options));
+            new ResilientRobotController(null!, NullLogger<ResilientRobotController>.Instance, options, _mockDelayService));
     }
 
     [Fact]
@@ -524,7 +529,7 @@ public class ResilientRobotControllerTests : IDisposable
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => 
-            new ResilientRobotController(_mockCommunicationService.Object, null!, options));
+            new ResilientRobotController(_mockCommunicationService.Object, null!, options, _mockDelayService));
     }
 
     [Fact]
@@ -532,7 +537,7 @@ public class ResilientRobotControllerTests : IDisposable
     {
         // Act & Assert
         Assert.Throws<NullReferenceException>(() => 
-            new ResilientRobotController(_mockCommunicationService.Object, NullLogger<ResilientRobotController>.Instance, null!));
+            new ResilientRobotController(_mockCommunicationService.Object, NullLogger<ResilientRobotController>.Instance, null!, _mockDelayService));
     }
 
     [Fact]
@@ -543,7 +548,18 @@ public class ResilientRobotControllerTests : IDisposable
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => 
-            new ResilientRobotController(_mockCommunicationService.Object, NullLogger<ResilientRobotController>.Instance, options));
+            new ResilientRobotController(_mockCommunicationService.Object, NullLogger<ResilientRobotController>.Instance, options, _mockDelayService));
+    }
+
+    [Fact]
+    public void Constructor_NullDelayService_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        var options = Options.Create(new RobotCommunicationOptions());
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => 
+            new ResilientRobotController(_mockCommunicationService.Object, NullLogger<ResilientRobotController>.Instance, options, null!));
     }
 
     [Fact]
@@ -564,7 +580,8 @@ public class ResilientRobotControllerTests : IDisposable
         var controller = new ResilientRobotController(
             disposableMock.Object,
             NullLogger<ResilientRobotController>.Instance,
-            options);
+            options,
+            new MockDelayService());
 
         // Act
         controller.Dispose();
@@ -705,6 +722,496 @@ public class ResilientRobotControllerTests : IDisposable
         // Act & Assert - the method doesn't validate arguments, it delegates to the service
         var result = await _controller.DisconnectRobotAsync(robotId);
         Assert.True(result); // DisconnectRobotAsync typically returns true for successful completion
+    }
+
+    [Fact]
+    public async Task ConnectRobotAsync_ExponentialBackoffTiming_ShouldRespectRetryDelays()
+    {
+        // Arrange
+        const string robotId = "BACKOFF-TIMING-ROBOT";
+        var position = new Position(0, 0);
+        var orientation = Orientation.North;
+        
+        _mockCommunicationService
+            .Setup(s => s.ConnectToRobotAsync(robotId, position, orientation, It.IsAny<CancellationToken>()))
+            .Throws(new InvalidOperationException("Connection failed"));
+
+        // Clear any previous delay calls
+        _mockDelayService.ClearCalls();
+
+        // Act
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _controller.ConnectRobotAsync(robotId, position, orientation));
+
+        // Assert
+        var delayCalls = _mockDelayService.DelayCalls;
+        Assert.Equal(3, delayCalls.Count); // Should have 3 retry delays (for 4 total attempts with MaxRetryAttempts = 3)
+        
+        // Verify exponential backoff pattern (1s, 2s, 4s)
+        Assert.Equal(TimeSpan.FromSeconds(1), delayCalls[0].Delay);
+        Assert.Equal(TimeSpan.FromSeconds(2), delayCalls[1].Delay);
+        Assert.Equal(TimeSpan.FromSeconds(4), delayCalls[2].Delay);
+    }
+
+    [Fact]
+    public async Task SendCommandWithResilienceAsync_WithZeroRetries_ShouldNotRetry()
+    {
+        // Arrange
+        var optionsWithNoRetries = Options.Create(new RobotCommunicationOptions
+        {
+            MaxRetryAttempts = 0,
+            CommandTimeout = TimeSpan.FromSeconds(30),
+            CircuitBreakerMinimumThroughput = 3,
+            CircuitBreakerSamplingDuration = TimeSpan.FromSeconds(60)
+        });
+
+        var controllerWithNoRetries = new ResilientRobotController(
+            _mockCommunicationService.Object,
+            NullLogger<ResilientRobotController>.Instance,
+            optionsWithNoRetries,
+            new MockDelayService());
+
+        const string robotId = "NO-RETRY-ROBOT";
+        const char instruction = 'F';
+        
+        var callCount = 0;
+        _mockCommunicationService
+            .Setup(s => s.SendCommandAsync(robotId, instruction, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                callCount++;
+                throw new InvalidOperationException("Command failed");
+            });
+
+        // Act & Assert
+        await Assert.ThrowsAsync<RobotCommandException>(
+            () => controllerWithNoRetries.SendCommandWithResilienceAsync(robotId, instruction));
+        
+        Assert.Equal(1, callCount); // Should only be called once, no retries
+
+        controllerWithNoRetries.Dispose();
+    }
+
+    [Fact]
+    public async Task ConnectRobotAsync_ConcurrentConnections_ShouldHandleSimultaneousRequests()
+    {
+        // Arrange
+        const int concurrentRequests = 5;
+        var tasks = new List<Task<bool>>();
+        var position = new Position(0, 0);
+        var orientation = Orientation.North;
+
+        _mockCommunicationService
+            .Setup(s => s.ConnectToRobotAsync(It.IsAny<string>(), position, orientation, It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await Task.Delay(100); // Simulate some work
+                return true;
+            });
+
+        // Act
+        for (int i = 0; i < concurrentRequests; i++)
+        {
+            var robotId = $"ROBOT-{i}";
+            tasks.Add(_controller.ConnectRobotAsync(robotId, position, orientation));
+        }
+
+        var results = await Task.WhenAll(tasks);
+
+        // Assert
+        Assert.All(results, result => Assert.True(result));
+        Assert.Equal(concurrentRequests, results.Length);
+        
+        // Verify all robots were connected
+        _mockCommunicationService.Verify(
+            s => s.ConnectToRobotAsync(It.IsAny<string>(), position, orientation, It.IsAny<CancellationToken>()),
+            Times.Exactly(concurrentRequests));
+    }
+
+    [Fact]
+    public async Task ExecuteInstructionSequenceAsync_VeryLongSequence_ShouldHandleLargeInstructions()
+    {
+        // Arrange
+        const string robotId = "LONG-SEQUENCE-ROBOT";
+        var longInstructions = new string('F', 1000); // 1000 forward movements
+        
+        _mockCommunicationService
+            .Setup(s => s.SendCommandAsync(robotId, 'F', It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResponse
+            {
+                CommandId = Guid.NewGuid().ToString(),
+                RobotId = robotId,
+                Status = CommandStatus.Executed,
+                ResponseTime = DateTime.UtcNow
+            });
+
+        // Act
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await _controller.ExecuteInstructionSequenceAsync(robotId, longInstructions);
+        stopwatch.Stop();
+
+        // Assert
+        Assert.Equal(1000, result.Count);
+        Assert.All(result, response => Assert.Equal(CommandStatus.Executed, response.Status));
+        
+        // Verify reasonable performance (should complete within reasonable time, accounting for 100ms delays)
+        Assert.True(stopwatch.ElapsedMilliseconds < 120000, $"Long sequence took {stopwatch.ElapsedMilliseconds}ms, expected < 120000ms");
+        
+        // Verify all commands were sent
+        _mockCommunicationService.Verify(
+            s => s.SendCommandAsync(robotId, 'F', It.IsAny<CancellationToken>()),
+            Times.Exactly(1000));
+    }
+
+    [Fact]
+    public async Task ExecuteInstructionSequenceAsync_MixedSuccessFailurePattern_ShouldStopOnFirstFailure()
+    {
+        // Arrange
+        const string robotId = "MIXED-PATTERN-ROBOT";
+        const string instructions = "FRFRFRFR"; // Should stop after first failure
+        
+        var callCount = 0;
+        _mockCommunicationService
+            .Setup(s => s.SendCommandAsync(robotId, It.IsAny<char>(), It.IsAny<CancellationToken>()))
+            .Returns<string, char, CancellationToken>((id, cmd, ct) =>
+            {
+                callCount++;
+                if (callCount == 3) // Third command fails
+                {
+                    throw new RobotCommandException("Robot malfunction");
+                }
+                return Task.FromResult(new CommandResponse
+                {
+                    CommandId = Guid.NewGuid().ToString(),
+                    RobotId = id,
+                    Status = CommandStatus.Executed,
+                    ResponseTime = DateTime.UtcNow
+                });
+            });
+
+        // Act
+        var result = await _controller.ExecuteInstructionSequenceAsync(robotId, instructions);
+
+        // Assert
+        Assert.Equal(3, result.Count); // Two successful + one failed
+        Assert.Equal(CommandStatus.Executed, result[0].Status);
+        Assert.Equal(CommandStatus.Executed, result[1].Status);
+        Assert.Equal(CommandStatus.Failed, result[2].Status);
+        Assert.Contains("Robot malfunction", result[2].ErrorMessage);
+        
+        // Verify execution stopped after failure
+        Assert.Equal(3, callCount);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    [InlineData(10)]
+    public async Task GetRobotStateAsync_WithDifferentRetryAttempts_ShouldRespectRetryConfiguration(int maxRetryAttempts)
+    {
+        // Arrange
+        var customOptions = Options.Create(new RobotCommunicationOptions
+        {
+            MaxRetryAttempts = maxRetryAttempts,
+            CommandTimeout = TimeSpan.FromSeconds(30),
+            CircuitBreakerMinimumThroughput = 3,
+            CircuitBreakerSamplingDuration = TimeSpan.FromSeconds(60)
+        });
+
+        var customController = new ResilientRobotController(
+            _mockCommunicationService.Object,
+            NullLogger<ResilientRobotController>.Instance,
+            customOptions,
+            new MockDelayService());
+
+        const string robotId = "RETRY-CONFIG-ROBOT";
+        
+        var callCount = 0;
+        _mockCommunicationService
+            .Setup(s => s.GetRobotStateAsync(robotId, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                callCount++;
+                throw new InvalidOperationException("State retrieval failed");
+            });
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => customController.GetRobotStateAsync(robotId));
+        
+        // Verify correct number of attempts (initial + retries)
+        Assert.Equal(maxRetryAttempts + 1, callCount);
+
+        customController.Dispose();
+    }
+
+    [Fact]
+    public async Task ConcurrentOperations_MultipleMethodsCalled_ShouldHandleGracefully()
+    {
+        // Arrange
+        const string robotId = "CONCURRENT-ROBOT";
+        var position = new Position(0, 0);
+        var orientation = Orientation.North;
+        
+        _mockCommunicationService
+            .Setup(s => s.ConnectToRobotAsync(robotId, position, orientation, It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await Task.Delay(50);
+                return true;
+            });
+        
+        _mockCommunicationService
+            .Setup(s => s.SendCommandAsync(robotId, It.IsAny<char>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await Task.Delay(50);
+                return new CommandResponse
+                {
+                    CommandId = Guid.NewGuid().ToString(),
+                    RobotId = robotId,
+                    Status = CommandStatus.Executed,
+                    ResponseTime = DateTime.UtcNow
+                };
+            });
+        
+        _mockCommunicationService
+            .Setup(s => s.GetRobotStateAsync(robotId, It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await Task.Delay(50);
+                return new RobotInstance
+                {
+                    Id = robotId,
+                    Position = position,
+                    Orientation = orientation,
+                    IsLost = false,
+                    LastCommunication = DateTime.UtcNow,
+                    ConnectionState = ConnectionState.Connected
+                };
+            });
+
+        // Act - Run multiple operations concurrently
+        var connectTask = _controller.ConnectRobotAsync(robotId, position, orientation);
+        var commandTask = _controller.SendCommandWithResilienceAsync(robotId, 'F');
+        var stateTask = _controller.GetRobotStateAsync(robotId);
+        
+        await Task.WhenAll(connectTask, commandTask, stateTask);
+        
+        var connectResult = await connectTask;
+        var commandResult = await commandTask;
+        var stateResult = await stateTask;
+
+        // Assert
+        Assert.True(connectResult); // Connect result
+        Assert.NotNull(commandResult); // Command result
+        Assert.NotNull(stateResult); // State result
+    }
+
+    [Fact]
+    public async Task SendCommandWithResilienceAsync_RapidSuccessiveCalls_ShouldHandleAllRequests()
+    {
+        // Arrange
+        const string robotId = "RAPID-CALLS-ROBOT";
+        const int numberOfCalls = 20;
+        
+        var callCount = 0;
+        _mockCommunicationService
+            .Setup(s => s.SendCommandAsync(robotId, It.IsAny<char>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.FromResult(new CommandResponse
+                {
+                    CommandId = Guid.NewGuid().ToString(),
+                    RobotId = robotId,
+                    Status = CommandStatus.Executed,
+                    ResponseTime = DateTime.UtcNow
+                });
+            });
+
+        // Act - Fire rapid successive calls
+        var tasks = new List<Task<CommandResponse>>();
+        for (int i = 0; i < numberOfCalls; i++)
+        {
+            tasks.Add(_controller.SendCommandWithResilienceAsync(robotId, 'F'));
+        }
+        
+        var results = await Task.WhenAll(tasks);
+
+        // Assert
+        Assert.Equal(numberOfCalls, results.Length);
+        Assert.All(results, result => Assert.Equal(CommandStatus.Executed, result.Status));
+        Assert.Equal(numberOfCalls, callCount);
+    }
+
+    [Theory]
+    [InlineData(100)]
+    [InlineData(1000)]
+    public async Task GetRobotStateAsync_WithHighMaxRetryAttempts_ShouldEventuallySucceed(int maxRetryAttempts)
+    {
+        // Arrange
+        var highRetryOptions = Options.Create(new RobotCommunicationOptions
+        {
+            MaxRetryAttempts = maxRetryAttempts,
+            CommandTimeout = TimeSpan.FromSeconds(30),
+            CircuitBreakerMinimumThroughput = 3,
+            CircuitBreakerSamplingDuration = TimeSpan.FromSeconds(60)
+        });
+
+        var highRetryController = new ResilientRobotController(
+            _mockCommunicationService.Object,
+            NullLogger<ResilientRobotController>.Instance,
+            highRetryOptions,
+            new MockDelayService());
+
+        const string robotId = "HIGH-RETRY-ROBOT";
+        
+        var callCount = 0;
+        _mockCommunicationService
+            .Setup(s => s.GetRobotStateAsync(robotId, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                callCount++;
+                // Succeed on the 50th attempt (well within the high retry limit)
+                if (callCount >= 50)
+                {
+                    return Task.FromResult<RobotInstance?>(new RobotInstance
+                    {
+                        Id = robotId,
+                        Position = new Position(1, 1),
+                        Orientation = Orientation.North,
+                        IsLost = false,
+                        LastCommunication = DateTime.UtcNow,
+                        ConnectionState = ConnectionState.Connected
+                    });
+                }
+                throw new InvalidOperationException("State retrieval failed");
+            });
+
+        // Act
+        var result = await highRetryController.GetRobotStateAsync(robotId);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(robotId, result.Id);
+        Assert.Equal(50, callCount); // Should have retried until success
+
+        highRetryController.Dispose();
+    }
+
+    [Fact]
+    public async Task ExecuteInstructionSequenceAsync_WithIntermittentNetworkIssues_ShouldRecover()
+    {
+        // Arrange
+        const string robotId = "NETWORK-ISSUES-ROBOT";
+        const string instructions = "FRFL"; // 4 commands
+        
+        var callCount = 0;
+        _mockCommunicationService
+            .Setup(s => s.SendCommandAsync(robotId, It.IsAny<char>(), It.IsAny<CancellationToken>()))
+            .Returns<string, char, CancellationToken>((id, cmd, ct) =>
+            {
+                callCount++;
+                // Simulate intermittent network issues - fail every 3rd call initially, then succeed
+                if (callCount <= 6 && callCount % 3 == 0)
+                {
+                    throw new HttpRequestException("Network timeout");
+                }
+                
+                return Task.FromResult(new CommandResponse
+                {
+                    CommandId = Guid.NewGuid().ToString(),
+                    RobotId = id,
+                    Status = CommandStatus.Executed,
+                    ResponseTime = DateTime.UtcNow
+                });
+            });
+
+        // Act
+        var result = await _controller.ExecuteInstructionSequenceAsync(robotId, instructions);
+
+        // Assert
+        Assert.Equal(4, result.Count);
+        Assert.All(result, response => Assert.Equal(CommandStatus.Executed, response.Status));
+        
+        // Should have made more calls due to retries
+        Assert.True(callCount > 4, $"Expected more than 4 calls due to retries, but got {callCount}");
+    }
+
+    [Fact]
+    public async Task DisconnectRobotAsync_ConcurrentDisconnections_ShouldHandleGracefully()
+    {
+        // Arrange
+        const string robotId = "CONCURRENT-DISCONNECT-ROBOT";
+        const int numberOfDisconnects = 10;
+        
+        var callCount = 0;
+        _mockCommunicationService
+            .Setup(s => s.DisconnectFromRobotAsync(robotId, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.CompletedTask;
+            });
+
+        // Act - Fire multiple concurrent disconnections
+        var tasks = new List<Task<bool>>();
+        for (int i = 0; i < numberOfDisconnects; i++)
+        {
+            tasks.Add(_controller.DisconnectRobotAsync(robotId));
+        }
+        
+        var results = await Task.WhenAll(tasks);
+
+        // Assert
+        Assert.Equal(numberOfDisconnects, results.Length);
+        Assert.All(results, result => Assert.True(result));
+        Assert.Equal(numberOfDisconnects, callCount);
+    }
+
+    [Fact]
+    public async Task HealthCheckRobotAsync_UnderHighConcurrency_ShouldMaintainAccuracy()
+    {
+        // Arrange
+        const string robotId = "HEALTH-CONCURRENCY-ROBOT";
+        const int numberOfHealthChecks = 50;
+        
+        var healthyCallCount = 0;
+        var unhealthyCallCount = 0;
+        
+        _mockCommunicationService
+            .Setup(s => s.PingRobotAsync(robotId, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                // Alternate between healthy and unhealthy responses
+                if (Interlocked.Increment(ref healthyCallCount) % 2 == 0)
+                {
+                    Interlocked.Increment(ref unhealthyCallCount);
+                    return Task.FromResult(false);
+                }
+                return Task.FromResult(true);
+            });
+
+        // Act - Fire many concurrent health checks
+        var tasks = new List<Task<bool>>();
+        for (int i = 0; i < numberOfHealthChecks; i++)
+        {
+            tasks.Add(_controller.HealthCheckRobotAsync(robotId));
+        }
+        
+        var results = await Task.WhenAll(tasks);
+
+        // Assert
+        Assert.Equal(numberOfHealthChecks, results.Length);
+        
+        var healthyCount = results.Count(r => r);
+        var unhealthyCount = results.Count(r => !r);
+        
+        // Should have roughly half healthy and half unhealthy
+        Assert.True(Math.Abs(healthyCount - unhealthyCount) <= 1, 
+            $"Expected roughly equal healthy ({healthyCount}) and unhealthy ({unhealthyCount}) results");
+        Assert.Equal(numberOfHealthChecks, healthyCallCount);
     }
 
     public void Dispose()

@@ -26,38 +26,24 @@ internal static class Program
         
         try
         {
-            // Check if this is a communication demo request
-            if (args.Contains("--communication-demo") || args.Contains("--comm-demo"))
+            // Always run the communication demo (new robot system)
+            logger.LogInformation("Starting Mars Robot Communication System Demo");
+            
+            var demo = host.Services.GetRequiredService<RobotCommunicationDemo>();
+            var cts = new CancellationTokenSource();
+            
+            // Handle Ctrl+C gracefully
+            System.Console.CancelKeyPress += (_, e) =>
             {
-                logger.LogInformation("Starting Mars Robot Communication System Demo");
-                
-                var demo = host.Services.GetRequiredService<RobotCommunicationDemo>();
-                var cts = new CancellationTokenSource();
-                
-                // Handle Ctrl+C gracefully
-                System.Console.CancelKeyPress += (_, e) =>
-                {
-                    e.Cancel = true;
-                    cts.Cancel();
-                    logger.LogInformation("Cancellation requested by user");
-                };
+                e.Cancel = true;
+                cts.Cancel();
+                logger.LogInformation("Cancellation requested by user");
+            };
 
-                await demo.RunDemoAsync(cts.Token);
-                
-                logger.LogInformation("Mars Robot Communication Demo completed successfully");
-                return 0;
-            }
-            else
-            {
-                // Run original simulation
-                logger.LogInformation("Mars Robot Simulation starting. Args: [{Args}]", string.Join(", ", args));
-                
-                var application = host.Services.GetRequiredService<Application>();
-                var result = application.Run();
-                
-                logger.LogInformation("Mars Robot Simulation completed with exit code: {ExitCode}", result);
-                return result;
-            }
+            await demo.RunDemoAsync(cts.Token);
+            
+            logger.LogInformation("Mars Robot Communication Demo completed successfully");
+            return 0;
         }
         catch (OperationCanceledException)
         {
@@ -81,10 +67,7 @@ internal static class Program
             .UseSerilog()
             .ConfigureServices((context, services) =>
             {
-                // Original simulation services
-                services.AddSingleton<Application>();
-                
-                // Robot communication services
+                // Robot communication services (new system only)
                 services.AddRobotCommunication();
             });
 }

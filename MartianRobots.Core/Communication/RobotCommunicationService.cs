@@ -47,15 +47,18 @@ public sealed class RobotCommunicationService : IRobotCommunicationService, IDis
     private readonly Random _random = new();
     private readonly ILogger<RobotCommunicationService> _logger;
     private readonly RobotCommunicationOptions _options;
+    private readonly IDelayService _delayService;
     private readonly object _lock = new();
     private bool _disposed;
 
     public RobotCommunicationService(
         ILogger<RobotCommunicationService> logger,
-        RobotCommunicationOptions options)
+        RobotCommunicationOptions options,
+        IDelayService delayService)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _delayService = delayService ?? throw new ArgumentNullException(nameof(delayService));
     }
 
     public async Task<bool> ConnectToRobotAsync(string robotId, Position initialPosition, Orientation initialOrientation, CancellationToken cancellationToken = default)
@@ -367,7 +370,7 @@ public sealed class RobotCommunicationService : IRobotCommunicationService, IDis
 
         _logger.LogTrace("Simulating network delay of {Delay}ms", totalDelay.TotalMilliseconds);
         
-        await Task.Delay(totalDelay, cancellationToken);
+        await _delayService.DelayAsync(totalDelay, cancellationToken);
     }
 
     private bool ShouldSimulateFailure()

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MartianRobots.Core.Communication;
+using MartianRobots.Tests.Mocks;
 
 namespace MartianRobots.Tests.Core.Communication;
 
@@ -9,19 +10,21 @@ public class RobotCommunicationServiceTests
     private readonly RobotCommunicationService _service;
     private readonly RobotCommunicationOptions _options;
     private readonly ILogger<RobotCommunicationService> _logger;
+    private readonly MockDelayService _mockDelayService;
 
     public RobotCommunicationServiceTests()
     {
         _options = new RobotCommunicationOptions
         {
-            BaseDelay = TimeSpan.Zero, // No delay for tests
-            MaxRandomDelay = TimeSpan.Zero, // No random delay for tests
+            BaseDelay = TimeSpan.FromMilliseconds(100), // Set realistic delay for testing
+            MaxRandomDelay = TimeSpan.FromMilliseconds(50), // Set realistic random delay
             FailureProbability = 0.0, // No simulated failures for tests
             MaxRetryAttempts = 3,
             CommandTimeout = TimeSpan.FromSeconds(30)
         };
         _logger = NullLogger<RobotCommunicationService>.Instance;
-        _service = new RobotCommunicationService(_logger, _options);
+        _mockDelayService = new MockDelayService();
+        _service = new RobotCommunicationService(_logger, _options, _mockDelayService);
     }
 
     [Fact]

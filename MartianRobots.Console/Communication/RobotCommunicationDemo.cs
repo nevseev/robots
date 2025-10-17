@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MartianRobots.Core.Communication;
+using MartianRobots.Core.Services;
 using MartianRobots.Abstractions.Models;
+using MartianRobots.Abstractions.Services;
 
 namespace MartianRobots.Console.Communication;
 
@@ -9,10 +11,13 @@ namespace MartianRobots.Console.Communication;
 /// Demonstration of real-time robot communication with resilience patterns
 /// </summary>
 public class RobotCommunicationDemo(
-    IServiceProvider serviceProvider, ILogger<RobotCommunicationDemo> logger)
+    IServiceProvider serviceProvider, 
+    ILogger<RobotCommunicationDemo> logger,
+    IDelayService delayService)
 {
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly ILogger<RobotCommunicationDemo> _logger = logger;
+    private readonly IDelayService _delayService = delayService;
 
     /// <summary>
     /// Runs the robot communication demonstration
@@ -72,7 +77,7 @@ public class RobotCommunicationDemo(
             }
 
             // Small delay between connections
-            await Task.Delay(1000, cancellationToken);
+            await _delayService.DelayAsync(1000, cancellationToken);
         }
     }
 
@@ -116,7 +121,7 @@ public class RobotCommunicationDemo(
             }
 
             // Small delay between commands
-            await Task.Delay(800, cancellationToken);
+            await _delayService.DelayAsync(800, cancellationToken);
         }
     }
 
@@ -155,7 +160,7 @@ public class RobotCommunicationDemo(
                 _logger.LogError(ex, "Exception checking health of robot {RobotId}", robotId);
             }
 
-            await Task.Delay(500, cancellationToken);
+            await _delayService.DelayAsync(500, cancellationToken);
         }
     }
 
@@ -201,7 +206,7 @@ public class RobotCommunicationDemo(
             }
 
             _logger.LogInformation(""); // Empty line for readability
-            await Task.Delay(2000, cancellationToken);
+            await _delayService.DelayAsync(2000, cancellationToken);
         }
     }
 }
@@ -230,6 +235,7 @@ public static class RobotCommunicationServiceExtensions
         });
 
         // Add communication services
+        services.AddSingleton<IDelayService, DelayService>();
         services.AddSingleton<IRobotCommunicationService, RobotCommunicationService>();
         services.AddSingleton<RobotCommunicationService>();
         services.AddSingleton<IResilientRobotController, ResilientRobotController>();

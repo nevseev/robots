@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MartianRobots.Core.Communication;
+using MartianRobots.Tests.Mocks;
 
 namespace MartianRobots.Tests.Integration.Communication;
 
@@ -36,6 +37,7 @@ public class RobotCommunicationIntegrationTests : IDisposable
         });
 
         // Add communication services
+        services.AddSingleton<IDelayService, MockDelayService>();
         services.AddSingleton<IRobotCommunicationService, RobotCommunicationService>();
         services.AddSingleton<RobotCommunicationService>();
         services.AddSingleton<ResilientRobotController>();
@@ -94,6 +96,7 @@ public class RobotCommunicationIntegrationTests : IDisposable
     public async Task ResilientController_WithTemporaryFailures_ShouldRecoverAutomatically()
     {
         // Arrange - Use service with some failure probability
+        var mockDelayService = new MockDelayService();
         var failureProneService = new RobotCommunicationService(
             NullLogger<RobotCommunicationService>.Instance,
             new RobotCommunicationOptions
@@ -103,7 +106,8 @@ public class RobotCommunicationIntegrationTests : IDisposable
                 FailureProbability = 0.3, // 30% failure rate
                 CommandTimeout = TimeSpan.FromSeconds(1),
                 MaxRetryAttempts = 5 // More retries to overcome failures
-            });
+            },
+            mockDelayService);
 
         var resilientController = new ResilientRobotController(
             failureProneService,
@@ -115,7 +119,8 @@ public class RobotCommunicationIntegrationTests : IDisposable
                 FailureProbability = 0.3,
                 CommandTimeout = TimeSpan.FromSeconds(1),
                 MaxRetryAttempts = 5
-            }));
+            }),
+            mockDelayService);
 
         const string robotId = "FAILURE-TEST-ROBOT";
         var position = new Position(2, 2);

@@ -12,16 +12,19 @@ public class ResilientRobotController : IResilientRobotController
     private readonly IRobotCommunicationService _communicationService;
     private readonly ILogger<ResilientRobotController> _logger;
     private readonly RobotCommunicationOptions _options;
+    private readonly IDelayService _delayService;
     private bool _disposed;
 
     public ResilientRobotController(
         IRobotCommunicationService communicationService,
         ILogger<ResilientRobotController> logger,
-        IOptions<RobotCommunicationOptions> options)
+        IOptions<RobotCommunicationOptions> options,
+        IDelayService delayService)
     {
         _communicationService = communicationService ?? throw new ArgumentNullException(nameof(communicationService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options.Value ?? throw new ArgumentNullException(nameof(options));
+        _delayService = delayService ?? throw new ArgumentNullException(nameof(delayService));
     }
 
     /// <summary>
@@ -44,7 +47,6 @@ public class ResilientRobotController : IResilientRobotController
                 {
                     _logger.LogInformation("Successfully executed {OperationName} on attempt {Attempt}", operationName, attempt);
                 }
-                
                 return result;
             }
             catch (Exception ex) when (attempt < maxAttempts && 
@@ -53,12 +55,14 @@ public class ResilientRobotController : IResilientRobotController
                                         ex is not RobotCommandException)
             {
                 lastException = ex;
-                var delay = TimeSpan.FromMilliseconds(Math.Pow(2, attempt - 1) * 1000); // Exponential backoff
+                // Exponential backoff with maximum cap to prevent overflow
+                var backoffSeconds = Math.Min(Math.Pow(2, attempt - 1), 300); // Cap at 5 minutes
+                var delay = TimeSpan.FromSeconds(backoffSeconds);
                 
                 _logger.LogWarning("Attempt {Attempt} failed for {OperationName}, retrying in {Delay}ms: {Exception}",
                     attempt, operationName, delay.TotalMilliseconds, ex.Message);
                 
-                await Task.Delay(delay, cancellationToken);
+                await _delayService.DelayAsync(delay, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -169,7 +173,7 @@ public class ResilientRobotController : IResilientRobotController
                 }
 
                 // Add small delay between commands to avoid overwhelming the robot
-                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+                await _delayService.DelayAsync(100, cancellationToken);
             }
             catch (RobotCommandException ex)
             {

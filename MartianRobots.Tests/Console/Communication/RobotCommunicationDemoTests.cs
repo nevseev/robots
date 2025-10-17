@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using MartianRobots.Console.Communication;
 using MartianRobots.Core.Communication;
+using MartianRobots.Tests.Mocks;
 
 namespace MartianRobots.Tests.Console.Communication;
 
@@ -10,6 +11,7 @@ public class RobotCommunicationDemoTests : IDisposable
 {
     private readonly ServiceProvider _serviceProvider;
     private readonly Mock<IResilientRobotController> _mockController;
+    private readonly MockDelayService _mockDelayService;
     private readonly RobotCommunicationDemo _demo;
 
     public RobotCommunicationDemoTests()
@@ -24,13 +26,18 @@ public class RobotCommunicationDemoTests : IDisposable
         _serviceProvider = services.BuildServiceProvider();
         
         _mockController = new Mock<IResilientRobotController>();
+        _mockDelayService = new MockDelayService();
 
         var demoServices = new ServiceCollection();
         demoServices.AddSingleton(_mockController.Object);
+        demoServices.AddSingleton<IDelayService>(_mockDelayService);
         demoServices.AddSingleton<ILogger<RobotCommunicationDemo>>(NullLogger<RobotCommunicationDemo>.Instance);
         var demoProvider = demoServices.BuildServiceProvider();
 
-        _demo = new RobotCommunicationDemo(demoProvider, NullLogger<RobotCommunicationDemo>.Instance);
+        _demo = new RobotCommunicationDemo(
+            demoProvider, 
+            NullLogger<RobotCommunicationDemo>.Instance,
+            _mockDelayService);
     }
 
     [Fact]
@@ -38,10 +45,13 @@ public class RobotCommunicationDemoTests : IDisposable
     {
         // Arrange
         SetupMockControllerForSuccessfulDemo();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30)); // Increased timeout
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)); // Short timeout since delays are mocked
 
         // Act & Assert
         await _demo.RunDemoAsync(cts.Token); // Should not throw
+        
+        // Verify that delays were called (demonstrating the demo ran through all phases)
+        Assert.True(_mockDelayService.DelayCalls.Count > 0, "Demo should have called delay service");
     }
 
     [Fact]
@@ -53,7 +63,7 @@ public class RobotCommunicationDemoTests : IDisposable
         cts.Cancel(); // Cancel immediately
 
         // Act & Assert
-        await Assert.ThrowsAsync<TaskCanceledException>(
+        await Assert.ThrowsAsync<OperationCanceledException>(
             () => _demo.RunDemoAsync(cts.Token));
     }
 
