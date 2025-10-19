@@ -45,14 +45,26 @@ public static class OrientationExtensions
     /// <summary>
     /// Turns the orientation left (counterclockwise)
     /// </summary>
-    public static Orientation TurnLeft(this Orientation orientation) => 
-        (Orientation)(((int)orientation - 1 + 4) % 4);
+    public static Orientation TurnLeft(this Orientation orientation) => orientation switch
+    {
+        Orientation.North => Orientation.West,
+        Orientation.East => Orientation.North,
+        Orientation.South => Orientation.East,
+        Orientation.West => Orientation.South,
+        _ => throw new UnreachableException($"Invalid orientation: {orientation}")
+    };
 
     /// <summary>
     /// Turns the orientation right (clockwise)
     /// </summary>
-    public static Orientation TurnRight(this Orientation orientation) => 
-        (Orientation)(((int)orientation + 1) % 4);
+    public static Orientation TurnRight(this Orientation orientation) => orientation switch
+    {
+        Orientation.North => Orientation.East,
+        Orientation.East => Orientation.South,
+        Orientation.South => Orientation.West,
+        Orientation.West => Orientation.North,
+        _ => throw new UnreachableException($"Invalid orientation: {orientation}")
+    };
 
     /// <summary>
     /// Gets the movement delta for moving forward in this orientation

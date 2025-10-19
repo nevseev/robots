@@ -10,16 +10,6 @@ public static class InputValidator
     private static readonly char[] ValidInstructions = ['L', 'R', 'F'];
 
     /// <summary>
-    /// Validates instruction string
-    /// </summary>
-    /// <param name="instructions">The instruction string to validate</param>
-    /// <exception cref="ArgumentException">Thrown when instructions are invalid</exception>
-    public static void ValidateInstructions(string instructions)
-    {
-        ValidateInstructions(instructions, null);
-    }
-
-    /// <summary>
     /// Validates instruction string with optional logging
     /// </summary>
     /// <param name="instructions">The instruction string to validate</param>
@@ -45,16 +35,6 @@ public static class InputValidator
     }
 
     /// <summary>
-    /// Validates grid dimension input
-    /// </summary>
-    /// <param name="gridLine">Line containing grid dimensions</param>
-    /// <exception cref="ArgumentException">Thrown when grid dimensions are invalid</exception>
-    public static void ValidateGridLine(string gridLine)
-    {
-        ValidateGridLine(gridLine, null);
-    }
-
-    /// <summary>
     /// Validates grid dimension input with optional logging
     /// </summary>
     /// <param name="gridLine">Line containing grid dimensions</param>
@@ -73,16 +53,6 @@ public static class InputValidator
             throw new ArgumentException("Grid dimensions must be valid integers");
         
         logger?.LogDebug("Grid line validation successful: {GridLine}", gridLine);
-    }
-
-    /// <summary>
-    /// Validates robot position input
-    /// </summary>
-    /// <param name="positionLine">Line containing robot position and orientation</param>
-    /// <exception cref="ArgumentException">Thrown when position data is invalid</exception>
-    public static void ValidateRobotPosition(string positionLine)
-    {
-        ValidateRobotPosition(positionLine, null);
     }
 
     /// <summary>
@@ -110,16 +80,6 @@ public static class InputValidator
             throw new ArgumentException($"Invalid orientation character: {parts[2][0]}. Must be N, E, S, or W");
         
         logger?.LogDebug("Robot position validation successful: {PositionLine}", positionLine);
-    }
-
-    /// <summary>
-    /// Validates the overall input structure
-    /// </summary>
-    /// <param name="input">Input array to validate</param>
-    /// <exception cref="ArgumentException">Thrown when input structure is invalid</exception>
-    public static void ValidateInputStructure(string[] input)
-    {
-        ValidateInputStructure(input, null);
     }
 
     /// <summary>

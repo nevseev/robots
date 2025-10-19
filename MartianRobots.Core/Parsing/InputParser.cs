@@ -8,16 +8,6 @@ namespace MartianRobots.Core.Parsing;
 public static class InputParser
 {
     /// <summary>
-    /// Parses grid dimensions from input line
-    /// </summary>
-    /// <param name="gridLine">Line containing grid dimensions</param>
-    /// <returns>MarsGrid instance</returns>
-    public static MarsGrid ParseGrid(string gridLine)
-    {
-        return ParseGrid(gridLine, null);
-    }
-
-    /// <summary>
     /// Parses grid dimensions from input line with optional logging
     /// </summary>
     /// <param name="gridLine">Line containing grid dimensions</param>
@@ -27,7 +17,7 @@ public static class InputParser
     {
         logger?.LogDebug("Parsing grid from line: {GridLine}", gridLine);
         
-        Validation.InputValidator.ValidateGridLine(gridLine);
+        Validation.InputValidator.ValidateGridLine(gridLine, logger);
         
         var gridParts = gridLine.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var maxX = int.Parse(gridParts[0]);
@@ -40,16 +30,6 @@ public static class InputParser
     }
 
     /// <summary>
-    /// Parses robot from position line
-    /// </summary>
-    /// <param name="positionLine">Line containing robot position and orientation</param>
-    /// <returns>Robot instance</returns>
-    public static Robot ParseRobot(string positionLine)
-    {
-        return ParseRobot(positionLine, null);
-    }
-
-    /// <summary>
     /// Parses robot from position line with optional logging
     /// </summary>
     /// <param name="positionLine">Line containing robot position and orientation</param>
@@ -59,7 +39,7 @@ public static class InputParser
     {
         logger?.LogDebug("Parsing robot from position line: {PositionLine}", positionLine);
         
-        Validation.InputValidator.ValidateRobotPosition(positionLine);
+        Validation.InputValidator.ValidateRobotPosition(positionLine, logger);
         
         var parts = positionLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var x = int.Parse(parts[0]);

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 
 namespace MartianRobots.Core.Communication;
 
@@ -18,19 +19,10 @@ public interface IRobotCommunicationService
     Task DisconnectFromRobotAsync(string robotId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Sends a command to a robot and waits for acknowledgment
+    /// Sends a batch of commands to a robot and waits for acknowledgments
+    /// More efficient than sending commands one at a time
     /// </summary>
-    Task<CommandResponse> SendCommandAsync(string robotId, char instruction, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Gets the current state of a robot
-    /// </summary>
-    Task<RobotInstance?> GetRobotStateAsync(string robotId, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Gets all connected robots
-    /// </summary>
-    IEnumerable<RobotInstance> GetConnectedRobots();
+    Task<List<CommandResponse>> SendCommandBatchAsync(string robotId, string instructions, MarsGrid grid, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Checks if a robot is connected and responsive
@@ -41,31 +33,21 @@ public interface IRobotCommunicationService
 /// <summary>
 /// Service for managing robot connections and command execution with resilience
 /// </summary>
-public sealed class RobotCommunicationService : IRobotCommunicationService, IDisposable
+public sealed class RobotCommunicationService(
+    ILogger<RobotCommunicationService> logger,
+    RobotCommunicationOptions options,
+    IDelayService delayService,
+    IFailureSimulator failureSimulator) : IRobotCommunicationService, IDisposable
 {
-    private readonly Dictionary<string, RobotInstance> _robots = new();
+    private readonly ConcurrentDictionary<string, RobotInstance> _robots = new();
     private readonly Random _random = new();
-    private readonly ILogger<RobotCommunicationService> _logger;
-    private readonly RobotCommunicationOptions _options;
-    private readonly IDelayService _delayService;
-    private readonly object _lock = new();
     private bool _disposed;
-
-    public RobotCommunicationService(
-        ILogger<RobotCommunicationService> logger,
-        RobotCommunicationOptions options,
-        IDelayService delayService)
-    {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _options = options ?? throw new ArgumentNullException(nameof(options));
-        _delayService = delayService ?? throw new ArgumentNullException(nameof(delayService));
-    }
 
     public async Task<bool> ConnectToRobotAsync(string robotId, Position initialPosition, Orientation initialOrientation, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(robotId);
         
-        _logger.LogInformation("Attempting to connect to robot {RobotId} at position {Position} facing {Orientation}",
+        logger.LogInformation("Attempting to connect to robot {RobotId} at position {Position} facing {Orientation}",
             robotId, initialPosition, initialOrientation);
 
         try
@@ -74,39 +56,36 @@ public sealed class RobotCommunicationService : IRobotCommunicationService, IDis
             await SimulateNetworkDelayAsync(cancellationToken);
 
             // Simulate connection failure
-            if (ShouldSimulateFailure())
+            if (failureSimulator.ShouldSimulateFailure())
             {
-                _logger.LogWarning("Simulated connection failure for robot {RobotId}", robotId);
+                logger.LogWarning("Simulated connection failure for robot {RobotId}", robotId);
                 return false;
             }
 
-            lock (_lock)
+            var robot = new RobotInstance
             {
-                var robot = new RobotInstance
-                {
-                    Id = robotId,
-                    Position = initialPosition,
-                    Orientation = initialOrientation,
-                    IsLost = false,
-                    LastCommunication = DateTime.UtcNow,
-                    ConnectionState = ConnectionState.Connected,
-                    FailedCommandCount = 0
-                };
+                Id = robotId,
+                Position = initialPosition,
+                Orientation = initialOrientation,
+                IsLost = false,
+                LastCommunication = DateTime.UtcNow,
+                ConnectionState = ConnectionState.Connected,
+                FailedCommandCount = 0
+            };
 
-                _robots[robotId] = robot;
-            }
+            _robots[robotId] = robot;
 
-            _logger.LogInformation("Successfully connected to robot {RobotId}", robotId);
+            logger.LogInformation("Successfully connected to robot {RobotId}", robotId);
             return true;
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Connection to robot {RobotId} was cancelled", robotId);
+            logger.LogWarning("Connection to robot {RobotId} was cancelled", robotId);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to connect to robot {RobotId}: {Error}", robotId, ex.Message);
+            logger.LogError(ex, "Failed to connect to robot {RobotId}: {Error}", robotId, ex.Message);
             return false;
         }
     }
@@ -115,186 +94,188 @@ public sealed class RobotCommunicationService : IRobotCommunicationService, IDis
     {
         ArgumentException.ThrowIfNullOrEmpty(robotId);
 
-        _logger.LogInformation("Disconnecting from robot {RobotId}", robotId);
+        logger.LogInformation("Disconnecting from robot {RobotId}", robotId);
 
         // Simulate disconnection delay
         await SimulateNetworkDelayAsync(cancellationToken);
 
-        lock (_lock)
+        if (_robots.TryRemove(robotId, out var robot))
         {
-            if (_robots.TryGetValue(robotId, out var robot))
-            {
-                robot.ConnectionState = ConnectionState.Disconnected;
-                _robots.Remove(robotId);
-                _logger.LogInformation("Successfully disconnected from robot {RobotId}", robotId);
-            }
-            else
-            {
-                _logger.LogWarning("Robot {RobotId} was not connected", robotId);
-            }
+            robot.ConnectionState = ConnectionState.Disconnected;
+            logger.LogInformation("Successfully disconnected from robot {RobotId}", robotId);
+        }
+        else
+        {
+            logger.LogWarning("Robot {RobotId} was not connected", robotId);
         }
     }
 
-    public async Task<CommandResponse> SendCommandAsync(string robotId, char instruction, CancellationToken cancellationToken = default)
+    public async Task<List<CommandResponse>> SendCommandBatchAsync(string robotId, string instructions, MarsGrid grid, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(robotId);
+        ArgumentException.ThrowIfNullOrEmpty(instructions);
+        ArgumentNullException.ThrowIfNull(grid);
 
-        var commandId = Guid.NewGuid().ToString();
-        var startTime = DateTime.UtcNow;
+        logger.LogInformation("Sending command batch of {Count} instructions to robot {RobotId}: {Instructions}",
+            instructions.Length, robotId, instructions);
 
-        _logger.LogDebug("Sending command {Instruction} to robot {RobotId} (CommandId: {CommandId})",
-            instruction, robotId, commandId);
+        var responses = new List<CommandResponse>();
+        
+        // Validate all commands first using CommandFactory - will throw if any command is invalid
+        var commands = Commands.CommandFactory.CreateCommands(instructions);
+        
+        logger.LogDebug("Validated {Count} commands for batch execution", commands.Count);
 
-        RobotInstance? robot;
-        lock (_lock)
+        // Check if robot exists and is connected before starting batch
+        if (!_robots.TryGetValue(robotId, out var robot))
         {
-            if (!_robots.TryGetValue(robotId, out robot))
-            {
-                _logger.LogError("Robot {RobotId} is not connected", robotId);
-                return new CommandResponse
+            logger.LogError("Robot {RobotId} is not connected", robotId);
+            return
+            [
+                new CommandResponse
                 {
-                    CommandId = commandId,
+                    CommandId = Guid.NewGuid().ToString(),
                     RobotId = robotId,
                     Status = CommandStatus.Failed,
                     ErrorMessage = "Robot not connected",
-                    ResponseTime = DateTime.UtcNow,
-                    ProcessingTime = DateTime.UtcNow - startTime
-                };
-            }
-
-            if (robot.ConnectionState != ConnectionState.Connected)
-            {
-                _logger.LogWarning("Robot {RobotId} is in state {State}, cannot send command", 
-                    robotId, robot.ConnectionState);
-                return new CommandResponse
-                {
-                    CommandId = commandId,
-                    RobotId = robotId,
-                    Status = CommandStatus.Failed,
-                    ErrorMessage = $"Robot in invalid state: {robot.ConnectionState}",
-                    ResponseTime = DateTime.UtcNow,
-                    ProcessingTime = DateTime.UtcNow - startTime
-                };
-            }
+                    ResponseTime = DateTime.UtcNow
+                }
+            ];
         }
 
-        try
+        // Execute each command directly
+        for (int i = 0; i < commands.Count; i++)
         {
-            // Simulate network delay for command transmission
-            await SimulateNetworkDelayAsync(cancellationToken);
+            var command = commands[i];
+            var instruction = instructions[i];
+            var commandId = Guid.NewGuid().ToString();
+            var startTime = DateTime.UtcNow;
 
-            // Simulate command failure
-            if (ShouldSimulateFailure())
+            try
             {
-                lock (_lock)
+                // Simulate network delay
+                await SimulateNetworkDelayAsync(cancellationToken);
+
+                // Check robot state before each command
+                if (robot.ConnectionState != ConnectionState.Connected)
+                {
+                    logger.LogWarning("Robot {RobotId} is in state {State}, stopping batch execution",
+                        robotId, robot.ConnectionState);
+                    
+                    responses.Add(new CommandResponse
+                    {
+                        CommandId = commandId,
+                        RobotId = robotId,
+                        Status = CommandStatus.Failed,
+                        ErrorMessage = $"Robot in invalid state: {robot.ConnectionState}",
+                        ResponseTime = DateTime.UtcNow,
+                        ProcessingTime = DateTime.UtcNow - startTime
+                    });
+                    break;
+                }
+
+                // Simulate command failure
+                if (failureSimulator.ShouldSimulateFailure())
                 {
                     robot.FailedCommandCount++;
                     if (robot.FailedCommandCount >= 3)
                     {
                         robot.ConnectionState = ConnectionState.Unstable;
                     }
+
+                    logger.LogWarning("Simulated command failure for robot {RobotId}, command {Instruction}",
+                        robotId, instruction);
+
+                    responses.Add(new CommandResponse
+                    {
+                        CommandId = commandId,
+                        RobotId = robotId,
+                        Status = CommandStatus.Failed,
+                        ErrorMessage = "Simulated communication failure",
+                        ResponseTime = DateTime.UtcNow,
+                        ProcessingTime = DateTime.UtcNow - startTime
+                    });
+                    continue;
                 }
 
-                _logger.LogWarning("Simulated command failure for robot {RobotId}, command {Instruction}",
-                    robotId, instruction);
+                // Create a Robot model for command execution
+                var robotModel = new Robot(robot.Position, robot.Orientation);
 
-                return new CommandResponse
-                {
-                    CommandId = commandId,
-                    RobotId = robotId,
-                    Status = CommandStatus.Failed,
-                    ErrorMessage = "Simulated communication failure",
-                    ResponseTime = DateTime.UtcNow,
-                    ProcessingTime = DateTime.UtcNow - startTime
-                };
-            }
+                // Execute the command using the Command pattern
+                command.Execute(robotModel, grid);
 
-            // Execute the command on the robot
-            var result = await ExecuteCommandOnRobotAsync(robot, instruction, cancellationToken);
-
-            lock (_lock)
-            {
-                // Reset failure count on success
+                // Update robot instance state from the robot model
+                robot.Position = robotModel.Position;
+                robot.Orientation = robotModel.Orientation;
+                robot.IsLost = robotModel.IsLost;
                 robot.FailedCommandCount = 0;
                 robot.ConnectionState = ConnectionState.Connected;
                 robot.LastCommunication = DateTime.UtcNow;
 
-                // Update robot state
-                if (result.NewPosition.HasValue)
-                    robot.Position = result.NewPosition.Value;
-                if (result.NewOrientation.HasValue)
-                    robot.Orientation = result.NewOrientation.Value;
-                robot.IsLost = result.IsLost;
+                logger.LogDebug("Command {Instruction} executed successfully on robot {RobotId}", 
+                    instruction, robotId);
+
+                responses.Add(new CommandResponse
+                {
+                    CommandId = commandId,
+                    RobotId = robotId,
+                    Status = CommandStatus.Executed,
+                    NewPosition = robot.Position,
+                    NewOrientation = robot.Orientation,
+                    IsLost = robot.IsLost,
+                    ResponseTime = DateTime.UtcNow,
+                    ProcessingTime = DateTime.UtcNow - startTime
+                });
+
+                // Stop batch execution if robot is lost
+                if (robot.IsLost)
+                {
+                    logger.LogWarning("Robot {RobotId} lost during batch execution, stopping after {ExecutedCount}/{TotalCount} commands",
+                        robotId, responses.Count, instructions.Length);
+                    break;
+                }
             }
-
-            _logger.LogDebug("Command {Instruction} executed successfully on robot {RobotId}", 
-                instruction, robotId);
-
-            return new CommandResponse
+            catch (OperationCanceledException)
             {
-                CommandId = commandId,
-                RobotId = robotId,
-                Status = CommandStatus.Executed,
-                NewPosition = result.NewPosition,
-                NewOrientation = result.NewOrientation,
-                IsLost = result.IsLost,
-                ResponseTime = DateTime.UtcNow,
-                ProcessingTime = DateTime.UtcNow - startTime
-            };
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogWarning("Command {Instruction} to robot {RobotId} was cancelled", instruction, robotId);
-            return new CommandResponse
-            {
-                CommandId = commandId,
-                RobotId = robotId,
-                Status = CommandStatus.TimedOut,
-                ErrorMessage = "Command was cancelled",
-                ResponseTime = DateTime.UtcNow,
-                ProcessingTime = DateTime.UtcNow - startTime
-            };
-        }
-        catch (Exception ex)
-        {
-            lock (_lock)
+                logger.LogWarning("Batch execution cancelled for robot {RobotId} after {ExecutedCount} commands",
+                    robotId, responses.Count);
+                
+                responses.Add(new CommandResponse
+                {
+                    CommandId = commandId,
+                    RobotId = robotId,
+                    Status = CommandStatus.TimedOut,
+                    ErrorMessage = "Batch execution was cancelled",
+                    ResponseTime = DateTime.UtcNow,
+                    ProcessingTime = DateTime.UtcNow - startTime
+                });
+                break;
+            }
+            catch (Exception ex)
             {
                 robot.FailedCommandCount++;
                 robot.LastError = ex.Message;
+
+                logger.LogError(ex, "Failed to execute command {Instruction} on robot {RobotId}: {Error}",
+                    instruction, robotId, ex.Message);
+
+                responses.Add(new CommandResponse
+                {
+                    CommandId = commandId,
+                    RobotId = robotId,
+                    Status = CommandStatus.Failed,
+                    ErrorMessage = ex.Message,
+                    ResponseTime = DateTime.UtcNow,
+                    ProcessingTime = DateTime.UtcNow - startTime
+                });
             }
-
-            _logger.LogError(ex, "Failed to execute command {Instruction} on robot {RobotId}: {Error}",
-                instruction, robotId, ex.Message);
-
-            return new CommandResponse
-            {
-                CommandId = commandId,
-                RobotId = robotId,
-                Status = CommandStatus.Failed,
-                ErrorMessage = ex.Message,
-                ResponseTime = DateTime.UtcNow,
-                ProcessingTime = DateTime.UtcNow - startTime
-            };
         }
-    }
 
-    public Task<RobotInstance?> GetRobotStateAsync(string robotId, CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(robotId);
+        var successCount = responses.Count(r => r.Status == CommandStatus.Executed);
+        logger.LogInformation("Batch execution completed for robot {RobotId}: {SuccessCount}/{TotalCount} commands executed successfully",
+            robotId, successCount, responses.Count);
 
-        lock (_lock)
-        {
-            _robots.TryGetValue(robotId, out var robot);
-            return Task.FromResult(robot);
-        }
-    }
-
-    public IEnumerable<RobotInstance> GetConnectedRobots()
-    {
-        lock (_lock)
-        {
-            return _robots.Values.Where(r => r.ConnectionState == ConnectionState.Connected).ToList();
-        }
+        return responses;
     }
 
     public async Task<bool> PingRobotAsync(string robotId, CancellationToken cancellationToken = default)
@@ -305,13 +286,10 @@ public sealed class RobotCommunicationService : IRobotCommunicationService, IDis
         {
             await SimulateNetworkDelayAsync(cancellationToken);
 
-            lock (_lock)
+            if (_robots.TryGetValue(robotId, out var robot))
             {
-                if (_robots.TryGetValue(robotId, out var robot))
-                {
-                    robot.LastCommunication = DateTime.UtcNow;
-                    return robot.ConnectionState == ConnectionState.Connected;
-                }
+                robot.LastCommunication = DateTime.UtcNow;
+                return robot.ConnectionState == ConnectionState.Connected;
             }
 
             return false;
@@ -322,81 +300,34 @@ public sealed class RobotCommunicationService : IRobotCommunicationService, IDis
         }
     }
 
-    private async Task<(Position? NewPosition, Orientation? NewOrientation, bool IsLost)> ExecuteCommandOnRobotAsync(
-        RobotInstance robot, char instruction, CancellationToken cancellationToken)
-    {
-        // Simulate command processing delay
-        await SimulateNetworkDelayAsync(cancellationToken);
-
-        switch (instruction)
-        {
-            case 'L':
-                var newOrientationLeft = robot.Orientation.TurnLeft();
-                return (robot.Position, newOrientationLeft, robot.IsLost);
-
-            case 'R':
-                var newOrientationRight = robot.Orientation.TurnRight();
-                return (robot.Position, newOrientationRight, robot.IsLost);
-
-            case 'F':
-                if (robot.IsLost)
-                    return (robot.Position, robot.Orientation, true);
-
-                var delta = robot.Orientation.GetMovementDelta();
-                var newPosition = new Position(robot.Position.X + delta.X, robot.Position.Y + delta.Y);
-                
-                // For simulation, use default 5x5 grid (0,0 to 4,4) for boundary checking
-                // This simulates the robot detecting it would fall off the edge
-                var grid = new MarsGrid(4, 4); // 5x5 grid (0-4, 0-4)
-                
-                if (!grid.IsValidPosition(newPosition))
-                {
-                    // Robot falls off the grid and becomes lost
-                    return (robot.Position, robot.Orientation, true);
-                }
-                
-                return (newPosition, robot.Orientation, false);
-
-            default:
-                throw new ArgumentException($"Invalid instruction: {instruction}");
-        }
-    }
-
     private async Task SimulateNetworkDelayAsync(CancellationToken cancellationToken)
     {
-        var baseDelay = _options.BaseDelay;
-        var randomDelay = TimeSpan.FromMilliseconds(_random.NextDouble() * _options.MaxRandomDelay.TotalMilliseconds);
+        var baseDelay = options.BaseDelay;
+        var randomDelay = TimeSpan.FromMilliseconds(_random.NextDouble() * options.MaxRandomDelay.TotalMilliseconds);
         var totalDelay = baseDelay + randomDelay;
 
-        _logger.LogTrace("Simulating network delay of {Delay}ms", totalDelay.TotalMilliseconds);
+        logger.LogTrace("Simulating network delay of {Delay}ms", totalDelay.TotalMilliseconds);
         
-        await _delayService.DelayAsync(totalDelay, cancellationToken);
-    }
-
-    private bool ShouldSimulateFailure()
-    {
-        return _random.NextDouble() < _options.FailureProbability;
+        await delayService.DelayAsync(totalDelay, cancellationToken);
     }
 
     public void Dispose()
     {
-        if (!_disposed)
+        if (_disposed)
         {
-            _logger.LogInformation("Disposing robot communication service, disconnecting {Count} robots", _robots.Count);
-            
-            foreach (var robotId in _robots.Keys.ToList())
-            {
-                try
-                {
-                    DisconnectFromRobotAsync(robotId).Wait(TimeSpan.FromSeconds(5));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to disconnect robot {RobotId} during disposal", robotId);
-                }
-            }
-
-            _disposed = true;
+            return;
         }
+        
+        logger.LogInformation("Disposing robot communication service, disconnecting {Count} robots", _robots.Count);
+
+        // Synchronously disconnect all robots by updating their state
+        foreach (var (robotId, robot) in _robots)
+        {
+            robot.ConnectionState = ConnectionState.Disconnected;
+            logger.LogDebug("Marked robot {RobotId} as disconnected during disposal", robotId);
+        }
+
+        _robots.Clear();
+        _disposed = true;
     }
 }

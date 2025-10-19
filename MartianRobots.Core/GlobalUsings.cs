@@ -5,3 +5,4 @@ global using MartianRobots.Abstractions.Models;
 global using MartianRobots.Abstractions.Commands;
 global using MartianRobots.Abstractions.Strategies;
 global using MartianRobots.Abstractions.Services;
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MartianRobots.Tests")]

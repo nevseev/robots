@@ -1,5 +1,3 @@
-using MartianRobots.Abstractions.Services;
-
 namespace MartianRobots.Core.Services;
 
 /// <summary>
@@ -11,11 +9,5 @@ public sealed class DelayService : IDelayService
     public async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken = default)
     {
         await Task.Delay(delay, cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public async Task DelayAsync(int millisecondsDelay, CancellationToken cancellationToken = default)
-    {
-        await Task.Delay(millisecondsDelay, cancellationToken);
     }
 }

@@ -7,7 +7,8 @@ public sealed class MarsGrid
 {
     private readonly int _maxX;
     private readonly int _maxY;
-    private readonly HashSet<Position> _scents = [];
+    // Using ConcurrentDictionary as a thread-safe set - the bool value is unused
+    private readonly ConcurrentDictionary<Position, bool> _scents = new();
 
     /// <summary>
     /// Creates a new Mars grid with the specified upper-right coordinates
@@ -41,13 +42,13 @@ public sealed class MarsGrid
     /// </summary>
     /// <param name="position">The position to check for scent</param>
     /// <returns>True if a scent exists, false otherwise</returns>
-    public bool HasScent(Position position) => _scents.Contains(position);
+    public bool HasScent(Position position) => _scents.ContainsKey(position);
 
     /// <summary>
     /// Adds a robot scent at the given position
     /// </summary>
     /// <param name="position">The position where the scent should be added</param>
-    public void AddScent(Position position) => _scents.Add(position);
+    public void AddScent(Position position) => _scents.TryAdd(position, true);
 
     /// <summary>
     /// Validates that an initial robot position is within the grid
@@ -65,5 +66,6 @@ public sealed class MarsGrid
     /// <summary>
     /// Gets the grid dimensions as a string
     /// </summary>
-    public override string ToString() => $"Mars Grid: (0,0) to ({_maxX},{_maxY}), Scents: {_scents.Count}";
+    public override string ToString() => 
+        $"Mars Grid: (0,0) to ({_maxX},{_maxY}), Scents: {_scents.Count}";
 }

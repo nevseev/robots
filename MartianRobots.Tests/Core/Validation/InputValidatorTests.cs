@@ -1,4 +1,5 @@
 using MartianRobots.Core.Validation;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MartianRobots.Tests.Core.Validation;
 
@@ -11,7 +12,7 @@ public class InputValidatorTests
     [InlineData("F")]
     public void ValidateInstructions_WithValidInstructions_ShouldNotThrow(string instructions)
     {
-        var action = () => InputValidator.ValidateInstructions(instructions);
+        var action = () => InputValidator.ValidateInstructions(instructions, NullLogger.Instance);
         action.Should().NotThrow();
     }
 
@@ -20,7 +21,7 @@ public class InputValidatorTests
     [InlineData(null)]
     public void ValidateInstructions_WithEmptyOrNull_ShouldThrowArgumentException(string? instructions)
     {
-        var action = () => InputValidator.ValidateInstructions(instructions!);
+        var action = () => InputValidator.ValidateInstructions(instructions!, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Instruction string cannot be empty");
     }
@@ -31,7 +32,7 @@ public class InputValidatorTests
         // Arrange
         var longInstructions = new string('L', 100); // 100 characters
 
-        var action = () => InputValidator.ValidateInstructions(longInstructions);
+        var action = () => InputValidator.ValidateInstructions(longInstructions, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Instruction string must be less than 100 characters");
     }
@@ -43,7 +44,7 @@ public class InputValidatorTests
     [InlineData("lrf")] // lowercase
     public void ValidateInstructions_WithInvalidCharacters_ShouldThrowArgumentException(string instructions)
     {
-        var action = () => InputValidator.ValidateInstructions(instructions);
+        var action = () => InputValidator.ValidateInstructions(instructions, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .And.Message.Should().StartWith("Invalid instruction character:");
     }
@@ -55,7 +56,7 @@ public class InputValidatorTests
     [InlineData("  10   20  ")] // With whitespace
     public void ValidateGridLine_WithValidGrid_ShouldNotThrow(string gridLine)
     {
-        var action = () => InputValidator.ValidateGridLine(gridLine);
+        var action = () => InputValidator.ValidateGridLine(gridLine, NullLogger.Instance);
         action.Should().NotThrow();
     }
 
@@ -66,7 +67,7 @@ public class InputValidatorTests
     [InlineData("   ")]
     public void ValidateGridLine_WithWrongNumberOfParts_ShouldThrowArgumentException(string gridLine)
     {
-        var action = () => InputValidator.ValidateGridLine(gridLine);
+        var action = () => InputValidator.ValidateGridLine(gridLine, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Grid dimensions must contain exactly two integers");
     }
@@ -78,7 +79,7 @@ public class InputValidatorTests
     [InlineData("5.5 3")]
     public void ValidateGridLine_WithNonIntegers_ShouldThrowArgumentException(string gridLine)
     {
-        var action = () => InputValidator.ValidateGridLine(gridLine);
+        var action = () => InputValidator.ValidateGridLine(gridLine, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Grid dimensions must be valid integers");
     }
@@ -90,7 +91,7 @@ public class InputValidatorTests
     [InlineData("  1   2   W  ")] // With whitespace
     public void ValidateRobotPosition_WithValidPosition_ShouldNotThrow(string positionLine)
     {
-        var action = () => InputValidator.ValidateRobotPosition(positionLine);
+        var action = () => InputValidator.ValidateRobotPosition(positionLine, NullLogger.Instance);
         action.Should().NotThrow();
     }
 
@@ -101,7 +102,7 @@ public class InputValidatorTests
     [InlineData("   ")]
     public void ValidateRobotPosition_WithWrongNumberOfParts_ShouldThrowArgumentException(string positionLine)
     {
-        var action = () => InputValidator.ValidateRobotPosition(positionLine);
+        var action = () => InputValidator.ValidateRobotPosition(positionLine, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Robot position must contain exactly three parts: x y orientation");
     }
@@ -112,7 +113,7 @@ public class InputValidatorTests
     [InlineData("1.5 2 N")]
     public void ValidateRobotPosition_WithInvalidCoordinates_ShouldThrowArgumentException(string positionLine)
     {
-        var action = () => InputValidator.ValidateRobotPosition(positionLine);
+        var action = () => InputValidator.ValidateRobotPosition(positionLine, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Robot coordinates must be valid integers");
     }
@@ -121,7 +122,7 @@ public class InputValidatorTests
     [InlineData("1 2 NE")]
     public void ValidateRobotPosition_WithInvalidOrientationLength_ShouldThrowArgumentException(string positionLine)
     {
-        var action = () => InputValidator.ValidateRobotPosition(positionLine);
+        var action = () => InputValidator.ValidateRobotPosition(positionLine, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Robot orientation must be a single character");
     }
@@ -135,7 +136,7 @@ public class InputValidatorTests
         // Arrange
         var orientationChar = positionLine.Split(' ')[2][0];
 
-        var action = () => InputValidator.ValidateRobotPosition(positionLine);
+        var action = () => InputValidator.ValidateRobotPosition(positionLine, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage($"Invalid orientation character: {orientationChar}. Must be N, E, S, or W");
     }
@@ -146,14 +147,14 @@ public class InputValidatorTests
         // Arrange
         var input = new[] { "5 3", "1 1 E", "RFRFRFRF", "3 2 N", "FRRFLLFFRRFLL" };
 
-        var action = () => InputValidator.ValidateInputStructure(input);
+        var action = () => InputValidator.ValidateInputStructure(input, NullLogger.Instance);
         action.Should().NotThrow();
     }
 
     [Fact]
     public void ValidateInputStructure_WithNullInput_ShouldThrowArgumentNullException()
     {
-        var action = () => InputValidator.ValidateInputStructure(null!);
+        var action = () => InputValidator.ValidateInputStructure(null!, NullLogger.Instance);
         action.Should().Throw<ArgumentNullException>();
     }
 
@@ -163,7 +164,7 @@ public class InputValidatorTests
         // Arrange
         var input = Array.Empty<string>();
 
-        var action = () => InputValidator.ValidateInputStructure(input);
+        var action = () => InputValidator.ValidateInputStructure(input, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Input cannot be empty");
     }
@@ -174,7 +175,7 @@ public class InputValidatorTests
         // Arrange
         var input = new[] { "5 3" };
 
-        var action = () => InputValidator.ValidateInputStructure(input);
+        var action = () => InputValidator.ValidateInputStructure(input, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Input must contain at least grid dimensions and one robot definition");
     }
@@ -185,7 +186,7 @@ public class InputValidatorTests
         // Arrange
         var input = new[] { "5 3", "1 1 E" };
 
-        var action = () => InputValidator.ValidateInputStructure(input);
+        var action = () => InputValidator.ValidateInputStructure(input, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Input must contain at least grid dimensions and one robot definition");
     }
@@ -196,7 +197,7 @@ public class InputValidatorTests
         // Arrange - Missing instructions for second robot
         var input = new[] { "5 3", "1 1 E", "RFRFRFRF", "3 2 N" };
 
-        var action = () => InputValidator.ValidateInputStructure(input);
+        var action = () => InputValidator.ValidateInputStructure(input, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Each robot must have both position and instruction lines");
     }
@@ -207,7 +208,7 @@ public class InputValidatorTests
         // Arrange - Missing instructions for first robot - need enough data to trigger different validation
         var input = new[] { "5 3", "1 1 E", "RFRFRFRF", "3 2 N" }; // Missing instructions for second robot
 
-        var action = () => InputValidator.ValidateInputStructure(input);
+        var action = () => InputValidator.ValidateInputStructure(input, NullLogger.Instance);
         action.Should().Throw<ArgumentException>()
             .WithMessage("Each robot must have both position and instruction lines");
     }

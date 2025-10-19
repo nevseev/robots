@@ -5,5 +5,4 @@ global using Xunit;
 global using FluentAssertions;
 global using Moq;
 global using MartianRobots.Abstractions.Models;
-global using MartianRobots.Abstractions.Commands;
 global using MartianRobots.Abstractions.Services;

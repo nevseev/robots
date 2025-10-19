@@ -13,31 +13,17 @@ public interface IMovementStrategy
     /// </summary>
     /// <param name="robot">The robot to move</param>
     /// <param name="grid">The grid the robot operates in</param>
-    /// <returns>True if the robot moved successfully, false if it was lost or blocked</returns>
-    bool TryMove(Robot robot, MarsGrid grid);
-    
-    /// <summary>
-    /// Attempts to move the robot according to this strategy with optional logging
-    /// </summary>
-    /// <param name="robot">The robot to move</param>
-    /// <param name="grid">The grid the robot operates in</param>
     /// <param name="logger">Optional logger for diagnostics</param>
     /// <returns>True if the robot moved successfully, false if it was lost or blocked</returns>
-    bool TryMove(Robot robot, MarsGrid grid, ILogger? logger);
+    bool TryMove(Robot robot, MarsGrid grid, ILogger? logger = null);
 }
 
 /// <summary>
 /// Abstract base class for movement strategies implementing common logic
-/// Follows DRY principle by centralizing shared movement logic
 /// </summary>
 public abstract class MovementStrategyBase : IMovementStrategy
 {
-    public bool TryMove(Robot robot, MarsGrid grid)
-    {
-        return TryMove(robot, grid, null);
-    }
-
-    public bool TryMove(Robot robot, MarsGrid grid, ILogger? logger)
+    public bool TryMove(Robot robot, MarsGrid grid, ILogger? logger = null)
     {
         logger?.LogDebug("Attempting to move robot at position {Position} facing {Orientation}",
             robot.Position, robot.Orientation);

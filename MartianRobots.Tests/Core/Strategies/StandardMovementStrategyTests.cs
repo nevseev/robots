@@ -125,4 +125,49 @@ public class StandardMovementStrategyTests
         robot.Position.Should().Be(new Position(1, 0));
         robot.IsLost.Should().BeFalse();
     }
+
+    [Fact]
+    public void TryMove_FromScentedPositionToValidPosition_ShouldMoveNormally()
+    {
+        // Arrange
+        var strategy = new StandardMovementStrategy();
+        var grid = new MarsGrid(5, 5);
+        
+        // Add scent at position (5, 5) - simulating a previous robot fell off when moving north
+        grid.AddScent(new Position(5, 5));
+        
+        // Place robot at the scented position but facing East (toward valid position)
+        var robot = new Robot(new Position(5, 5), Orientation.East);
+
+        // Act - Robot should move east to (6, 5)... wait, that's outside!
+        // Let me fix: robot at (4, 4) with scent, facing East to valid (5, 4)
+        robot = new Robot(new Position(4, 4), Orientation.East);
+        grid.AddScent(new Position(4, 4)); // Add scent at robot's position
+        
+        var result = strategy.TryMove(robot, grid);
+
+        // Assert - Robot should move normally to valid position despite being on scented position
+        result.Should().BeTrue();
+        robot.Position.Should().Be(new Position(5, 4)); // Moved to valid position
+        robot.IsLost.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TryMove_FromScentedPositionToInvalidPosition_ShouldStayInPlace()
+    {
+        // Arrange
+        var strategy = new StandardMovementStrategy();
+        var grid = new MarsGrid(5, 5);
+        
+        // Robot at edge position with pre-existing scent, facing off-grid
+        var robot = new Robot(new Position(5, 5), Orientation.North);
+        grid.AddScent(new Position(5, 5));
+        
+        var result = strategy.TryMove(robot, grid);
+
+        // Assert - Robot should stay in place due to scent preventing fall-off
+        result.Should().BeTrue();
+        robot.Position.Should().Be(new Position(5, 5)); // Stayed in place
+        robot.IsLost.Should().BeFalse(); // Protected by scent
+    }
 }

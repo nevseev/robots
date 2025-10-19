@@ -22,7 +22,7 @@ public sealed class TurnRightCommand : IRobotCommand
 /// </summary>
 public sealed class MoveForwardCommand : IRobotCommand
 {
-    private static readonly IMovementStrategy DefaultStrategy = new MartianRobots.Core.Strategies.StandardMovementStrategy();
+    private static readonly IMovementStrategy DefaultStrategy = new Strategies.StandardMovementStrategy();
 
     public void Execute(Robot robot, MarsGrid grid)
     {

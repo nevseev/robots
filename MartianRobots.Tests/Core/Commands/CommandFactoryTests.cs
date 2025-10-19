@@ -82,14 +82,16 @@ public class CommandFactoryTests
     }
 
     [Fact]
-    public void SupportedInstructions_ShouldContainAllValidInstructions()
+    public void GetCommand_ShouldSupportAllValidInstructions()
     {
-        var supportedInstructions = CommandFactory.SupportedInstructions.ToList();
+        // Verify that all valid instructions (L, R, F) are supported
+        var validInstructions = new[] { 'L', 'R', 'F' };
 
-        supportedInstructions.Should().Contain('L');
-        supportedInstructions.Should().Contain('R');
-        supportedInstructions.Should().Contain('F');
-        supportedInstructions.Should().HaveCount(3);
+        foreach (var instruction in validInstructions)
+        {
+            var command = CommandFactory.GetCommand(instruction);
+            command.Should().NotBeNull();
+        }
     }
 
     [Fact]

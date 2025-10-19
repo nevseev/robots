@@ -1,4 +1,4 @@
-using MartianRobots.Abstractions.Services;
+using System.Diagnostics.CodeAnalysis;
 
 namespace MartianRobots.Tests.Mocks;
 
@@ -7,7 +7,7 @@ namespace MartianRobots.Tests.Mocks;
 /// </summary>
 public sealed class MockDelayService : IDelayService
 {
-    private readonly List<DelayCall> _delayCalls = new();
+    private readonly List<DelayCall> _delayCalls = [];
     private readonly object _lock = new();
 
     /// <summary>
@@ -48,13 +48,9 @@ public sealed class MockDelayService : IDelayService
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
-    public Task DelayAsync(int millisecondsDelay, CancellationToken cancellationToken = default)
-    {
-        return DelayAsync(TimeSpan.FromMilliseconds(millisecondsDelay), cancellationToken);
-    }
 }
 
+[ExcludeFromCodeCoverage]
 /// <summary>
 /// Record of a delay call made to MockDelayService
 /// </summary>

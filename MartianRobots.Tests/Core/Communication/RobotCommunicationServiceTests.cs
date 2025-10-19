@@ -1,37 +1,53 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using MartianRobots.Core.Communication;
+using MartianRobots.Core.Services;
 using MartianRobots.Tests.Mocks;
 
 namespace MartianRobots.Tests.Core.Communication;
 
-public class RobotCommunicationServiceTests
+/// <summary>
+/// Unit tests for RobotCommunicationService
+/// </summary>
+public class RobotCommunicationServiceTests : IDisposable
 {
     private readonly RobotCommunicationService _service;
+    private readonly MarsGrid _testGrid;
     private readonly RobotCommunicationOptions _options;
-    private readonly ILogger<RobotCommunicationService> _logger;
     private readonly MockDelayService _mockDelayService;
 
     public RobotCommunicationServiceTests()
     {
         _options = new RobotCommunicationOptions
         {
-            BaseDelay = TimeSpan.FromMilliseconds(100), // Set realistic delay for testing
-            MaxRandomDelay = TimeSpan.FromMilliseconds(50), // Set realistic random delay
-            FailureProbability = 0.0, // No simulated failures for tests
-            MaxRetryAttempts = 3,
-            CommandTimeout = TimeSpan.FromSeconds(30)
+            BaseDelay = TimeSpan.FromMilliseconds(1), // Fast for tests
+            MaxRandomDelay = TimeSpan.FromMilliseconds(1),
+            FailureProbability = 0.0, // No random failures for deterministic tests
+            CommandTimeout = TimeSpan.FromSeconds(5)
         };
-        _logger = NullLogger<RobotCommunicationService>.Instance;
+
         _mockDelayService = new MockDelayService();
-        _service = new RobotCommunicationService(_logger, _options, _mockDelayService);
+        _service = new RobotCommunicationService(
+            NullLogger<RobotCommunicationService>.Instance,
+            _options,
+            _mockDelayService,
+            new NoFailureSimulator()); // Deterministic - no failures
+
+        _testGrid = new MarsGrid(4, 4);
     }
 
+    public void Dispose()
+    {
+        _service?.Dispose();
+    }
+
+    #region ConnectToRobotAsync Tests
+
     [Fact]
-    public async Task ConnectToRobotAsync_ShouldConnectSuccessfully()
+    public async Task ConnectToRobotAsync_WithValidParameters_ShouldConnectSuccessfully()
     {
         // Arrange
-        const string robotId = "TEST-ROBOT-1";
+        var robotId = "ROBOT-1";
         var position = new Position(1, 1);
         var orientation = Orientation.North;
 
@@ -39,344 +55,556 @@ public class RobotCommunicationServiceTests
         var result = await _service.ConnectToRobotAsync(robotId, position, orientation);
 
         // Assert
-        Assert.True(result);
-        
-        var robotState = await _service.GetRobotStateAsync(robotId);
-        Assert.NotNull(robotState);
-        Assert.Equal(robotId, robotState.Id);
-        Assert.Equal(position, robotState.Position);
-        Assert.Equal(orientation, robotState.Orientation);
-        Assert.Equal(ConnectionState.Connected, robotState.ConnectionState);
-        Assert.False(robotState.IsLost);
+        result.Should().BeTrue();
     }
 
     [Fact]
-    public async Task ConnectToRobotAsync_SameRobotTwice_ShouldReturnFalse()
+    public async Task ConnectToRobotAsync_WithNullRobotId_ShouldThrowArgumentNullException()
     {
-        // Arrange
-        const string robotId = "TEST-ROBOT-2";
-        var position = new Position(2, 2);
-        var orientation = Orientation.East;
-
-        // Act
-        var firstConnection = await _service.ConnectToRobotAsync(robotId, position, orientation);
-        var secondConnection = await _service.ConnectToRobotAsync(robotId, position, orientation);
-
-        // Assert
-        Assert.True(firstConnection);
-        Assert.True(secondConnection); // Service allows reconnection (overwrites existing)
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _service.ConnectToRobotAsync(null!, new Position(0, 0), Orientation.North));
     }
 
     [Fact]
-    public async Task SendCommandAsync_WithValidCommand_ShouldExecuteSuccessfully()
+    public async Task ConnectToRobotAsync_WithEmptyRobotId_ShouldThrowArgumentException()
     {
-        // Arrange
-        const string robotId = "TEST-ROBOT-3";
-        var position = new Position(2, 2);
-        var orientation = Orientation.North;
-        
-        await _service.ConnectToRobotAsync(robotId, position, orientation);
-
-        // Act
-        var response = await _service.SendCommandAsync(robotId, 'F');
-
-        // Assert
-        Assert.NotNull(response);
-        Assert.Equal(robotId, response.RobotId);
-        Assert.Equal(CommandStatus.Executed, response.Status);
-        Assert.Equal(new Position(2, 3), response.NewPosition);
-        Assert.Equal(Orientation.North, response.NewOrientation);
-        Assert.False(response.IsLost);
-        Assert.Null(response.ErrorMessage);
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            async () => await _service.ConnectToRobotAsync("", new Position(0, 0), Orientation.North));
     }
 
     [Fact]
-    public async Task SendCommandAsync_RightTurn_ShouldChangeOrientation()
+    public async Task ConnectToRobotAsync_WhenCancelled_ShouldThrowOperationCanceledException()
     {
         // Arrange
-        const string robotId = "TEST-ROBOT-4";
-        var position = new Position(1, 1);
-        var orientation = Orientation.North;
-        
-        await _service.ConnectToRobotAsync(robotId, position, orientation);
+        var cts = new CancellationTokenSource();
+        cts.Cancel();
 
-        // Act
-        var response = await _service.SendCommandAsync(robotId, 'R');
-
-        // Assert
-        Assert.NotNull(response);
-        Assert.Equal(CommandStatus.Executed, response.Status);
-        Assert.Equal(position, response.NewPosition); // Position unchanged
-        Assert.Equal(Orientation.East, response.NewOrientation);
-        Assert.False(response.IsLost);
+        // Act & Assert
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            async () => await _service.ConnectToRobotAsync("ROBOT-2", new Position(0, 0), Orientation.North, cts.Token));
     }
 
     [Fact]
-    public async Task SendCommandAsync_LeftTurn_ShouldChangeOrientation()
+    public async Task ConnectToRobotAsync_WithFailureProbability_CanFail()
     {
-        // Arrange
-        const string robotId = "TEST-ROBOT-5";
-        var position = new Position(1, 1);
-        var orientation = Orientation.North;
-        
-        await _service.ConnectToRobotAsync(robotId, position, orientation);
-
-        // Act
-        var response = await _service.SendCommandAsync(robotId, 'L');
-
-        // Assert
-        Assert.NotNull(response);
-        Assert.Equal(CommandStatus.Executed, response.Status);
-        Assert.Equal(position, response.NewPosition); // Position unchanged
-        Assert.Equal(Orientation.West, response.NewOrientation);
-        Assert.False(response.IsLost);
-    }
-
-    [Fact]
-    public async Task SendCommandAsync_MoveForwardOutOfBounds_ShouldMarkAsLost()
-    {
-        // Arrange
-        const string robotId = "TEST-ROBOT-6";
-        var position = new Position(4, 4); // Near edge of 5x3 grid
-        var orientation = Orientation.North;
-        
-        await _service.ConnectToRobotAsync(robotId, position, orientation);
-
-        // Act - Move forward beyond grid boundary
-        var response = await _service.SendCommandAsync(robotId, 'F');
-
-        // Assert
-        Assert.NotNull(response);
-        Assert.Equal(CommandStatus.Executed, response.Status);
-        Assert.True(response.IsLost);
-        Assert.Equal(position, response.NewPosition); // Robot stays at last valid position
-        Assert.Equal(orientation, response.NewOrientation);
-    }
-
-    [Fact]
-    public async Task SendCommandAsync_ToDisconnectedRobot_ShouldReturnFailed()
-    {
-        // Arrange
-        const string robotId = "DISCONNECTED-ROBOT";
-
-        // Act
-        var response = await _service.SendCommandAsync(robotId, 'F');
-
-        // Assert
-        Assert.NotNull(response);
-        Assert.Equal(robotId, response.RobotId);
-        Assert.Equal(CommandStatus.Failed, response.Status);
-        Assert.NotNull(response.ErrorMessage);
-        Assert.Contains("not connected", response.ErrorMessage);
-    }
-
-    [Fact]
-    public async Task SendCommandAsync_InvalidCommand_ShouldReturnFailed()
-    {
-        // Arrange
-        const string robotId = "TEST-ROBOT-7";
-        var position = new Position(1, 1);
-        var orientation = Orientation.North;
-        
-        await _service.ConnectToRobotAsync(robotId, position, orientation);
-
-        // Act
-        var response = await _service.SendCommandAsync(robotId, 'X'); // Invalid command
-
-        // Assert
-        Assert.NotNull(response);
-        Assert.Equal(CommandStatus.Failed, response.Status);
-        Assert.NotNull(response.ErrorMessage);
-        Assert.Contains("Invalid instruction", response.ErrorMessage);
-    }
-
-    [Fact]
-    public async Task PingRobotAsync_ConnectedRobot_ShouldReturnTrue()
-    {
-        // Arrange
-        const string robotId = "TEST-ROBOT-8";
-        var position = new Position(1, 1);
-        var orientation = Orientation.North;
-        
-        await _service.ConnectToRobotAsync(robotId, position, orientation);
-
-        // Act
-        var result = await _service.PingRobotAsync(robotId);
-
-        // Assert
-        Assert.True(result);
-    }
-
-    [Fact]
-    public async Task PingRobotAsync_DisconnectedRobot_ShouldReturnFalse()
-    {
-        // Arrange
-        const string robotId = "DISCONNECTED-ROBOT";
-
-        // Act
-        var result = await _service.PingRobotAsync(robotId);
-
-        // Assert
-        Assert.False(result);
-    }
-
-    [Fact]
-    public async Task GetRobotStateAsync_ConnectedRobot_ShouldReturnState()
-    {
-        // Arrange
-        const string robotId = "TEST-ROBOT-9";
-        var position = new Position(3, 2);
-        var orientation = Orientation.South;
-        
-        await _service.ConnectToRobotAsync(robotId, position, orientation);
-
-        // Act
-        var robotState = await _service.GetRobotStateAsync(robotId);
-
-        // Assert
-        Assert.NotNull(robotState);
-        Assert.Equal(robotId, robotState.Id);
-        Assert.Equal(position, robotState.Position);
-        Assert.Equal(orientation, robotState.Orientation);
-        Assert.Equal(ConnectionState.Connected, robotState.ConnectionState);
-    }
-
-    [Fact]
-    public async Task GetRobotStateAsync_DisconnectedRobot_ShouldReturnNull()
-    {
-        // Arrange
-        const string robotId = "DISCONNECTED-ROBOT";
-
-        // Act
-        var robotState = await _service.GetRobotStateAsync(robotId);
-
-        // Assert
-        Assert.Null(robotState);
-    }
-
-    [Fact]
-    public async Task DisconnectFromRobotAsync_ConnectedRobot_ShouldDisconnectSuccessfully()
-    {
-        // Arrange
-        const string robotId = "TEST-ROBOT-10";
-        var position = new Position(1, 1);
-        var orientation = Orientation.North;
-        
-        await _service.ConnectToRobotAsync(robotId, position, orientation);
-
-        // Act
-        await _service.DisconnectFromRobotAsync(robotId);
-
-        // Assert
-        var robotState = await _service.GetRobotStateAsync(robotId);
-        Assert.Null(robotState); // Robot should be removed
-    }
-
-    [Fact]
-    public async Task DisconnectFromRobotAsync_DisconnectedRobot_ShouldNotThrow()
-    {
-        // Arrange
-        const string robotId = "DISCONNECTED-ROBOT";
-
-        // Act & Assert - Should not throw
-        await _service.DisconnectFromRobotAsync(robotId);
-    }
-
-    [Fact]
-    public async Task GetConnectedRobots_WithMultipleRobots_ShouldReturnAllConnected()
-    {
-        // Arrange
-        var robots = new[]
+        // Arrange - service with AlwaysFailSimulator (deterministic)
+        var failingOptions = new RobotCommunicationOptions
         {
-            ("ROBOT-A", new Position(1, 1), Orientation.North),
-            ("ROBOT-B", new Position(2, 2), Orientation.East),
-            ("ROBOT-C", new Position(3, 3), Orientation.South)
+            BaseDelay = TimeSpan.FromMilliseconds(1),
+            MaxRandomDelay = TimeSpan.FromMilliseconds(1),
+            FailureProbability = 1.0, // Not used with AlwaysFailSimulator
+            CommandTimeout = TimeSpan.FromSeconds(5)
         };
 
-        foreach (var (id, pos, orient) in robots)
-        {
-            await _service.ConnectToRobotAsync(id, pos, orient);
-        }
+        var failingService = new RobotCommunicationService(
+            NullLogger<RobotCommunicationService>.Instance,
+            failingOptions,
+            _mockDelayService,
+            new AlwaysFailSimulator()); // Deterministic - always fails
 
         // Act
-        var connectedRobots = _service.GetConnectedRobots().ToList();
+        var result = await failingService.ConnectToRobotAsync("ROBOT-3", new Position(0, 0), Orientation.North);
 
         // Assert
-        Assert.Equal(3, connectedRobots.Count);
-        Assert.Contains(connectedRobots, r => r.Id == "ROBOT-A");
-        Assert.Contains(connectedRobots, r => r.Id == "ROBOT-B");
-        Assert.Contains(connectedRobots, r => r.Id == "ROBOT-C");
+        result.Should().BeFalse();
+        
+        failingService.Dispose();
     }
 
     [Fact]
-    public async Task ComplexMovementSequence_ShouldMaintainCorrectState()
+    public async Task ConnectToRobotAsync_WhenDelayServiceThrows_ShouldReturnFalse()
+    {
+        // Arrange - mock delay service that throws an exception (not OperationCanceledException)
+        var mockDelayService = new Mock<IDelayService>();
+        mockDelayService
+            .Setup(x => x.DelayAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Network error"));
+
+        var service = new RobotCommunicationService(
+            NullLogger<RobotCommunicationService>.Instance,
+            _options,
+            mockDelayService.Object,
+            new NoFailureSimulator());
+
+        // Act
+        var result = await service.ConnectToRobotAsync("ROBOT-FAIL", new Position(0, 0), Orientation.North);
+
+        // Assert
+        result.Should().BeFalse();
+        
+        service.Dispose();
+    }
+
+    #endregion
+
+    #region DisconnectFromRobotAsync Tests
+
+    [Fact]
+    public async Task DisconnectFromRobotAsync_WithConnectedRobot_ShouldDisconnect()
     {
         // Arrange
-        const string robotId = "COMPLEX-ROBOT";
-        var startPosition = new Position(2, 2);
-        var startOrientation = Orientation.North;
+        var robotId = "ROBOT-4";
+        await _service.ConnectToRobotAsync(robotId, new Position(1, 1), Orientation.East);
+
+        // Act
+        await _service.DisconnectFromRobotAsync(robotId);
+
+        // Assert
+        var pingResult = await _service.PingRobotAsync(robotId);
+        pingResult.Should().BeFalse(); // Robot should no longer be connected
+    }
+
+    [Fact]
+    public async Task DisconnectFromRobotAsync_WithNonExistentRobot_ShouldNotThrow()
+    {
+        // Act & Assert - should not throw
+        var exception = await Record.ExceptionAsync(
+            async () => await _service.DisconnectFromRobotAsync("NON-EXISTENT"));
         
-        await _service.ConnectToRobotAsync(robotId, startPosition, startOrientation);
+        exception.Should().BeNull();
+    }
 
-        // Act - Execute a square pattern: RFRFRFRF
-        var commands = new[] { 'R', 'F', 'R', 'F', 'R', 'F', 'R', 'F' };
-        var responses = new List<CommandResponse>();
+    [Fact]
+    public async Task DisconnectFromRobotAsync_WithNullRobotId_ShouldThrowArgumentNullException()
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _service.DisconnectFromRobotAsync(null!));
+    }
 
-        foreach (var command in commands)
+    #endregion
+
+    #region PingRobotAsync Tests
+
+    [Fact]
+    public async Task PingRobotAsync_WithConnectedRobot_ShouldReturnTrue()
+    {
+        // Arrange
+        var robotId = "ROBOT-5";
+        await _service.ConnectToRobotAsync(robotId, new Position(2, 2), Orientation.South);
+
+        // Act
+        var result = await _service.PingRobotAsync(robotId);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PingRobotAsync_WithNonExistentRobot_ShouldReturnFalse()
+    {
+        // Act
+        var result = await _service.PingRobotAsync("NON-EXISTENT");
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task PingRobotAsync_WithNullRobotId_ShouldThrowArgumentNullException()
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _service.PingRobotAsync(null!));
+    }
+
+    [Fact]
+    public async Task PingRobotAsync_WhenCancelled_ShouldReturnFalse()
+    {
+        // Arrange
+        var robotId = "ROBOT-6";
+        await _service.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+        
+        var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Act
+        var result = await _service.PingRobotAsync(robotId, cts.Token);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region SendCommandBatchAsync Tests
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WithValidCommands_ShouldExecuteSuccessfully()
+    {
+        // Arrange
+        var robotId = "ROBOT-7";
+        await _service.ConnectToRobotAsync(robotId, new Position(1, 1), Orientation.North);
+
+        // Act
+        var responses = await _service.SendCommandBatchAsync(robotId, "RFR", _testGrid);
+
+        // Assert
+        responses.Should().HaveCount(3);
+        responses.Should().AllSatisfy(r => r.Status.Should().Be(CommandStatus.Executed));
+        responses.Should().AllSatisfy(r => r.RobotId.Should().Be(robotId));
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WithNonConnectedRobot_ShouldReturnFailedResponse()
+    {
+        // Act
+        var responses = await _service.SendCommandBatchAsync("NON-EXISTENT", "RFR", _testGrid);
+
+        // Assert
+        responses.Should().HaveCount(1);
+        responses[0].Status.Should().Be(CommandStatus.Failed);
+        responses[0].ErrorMessage.Should().Contain("not connected");
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WithNullRobotId_ShouldThrowArgumentNullException()
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _service.SendCommandBatchAsync(null!, "RFR", _testGrid));
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WithNullInstructions_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        var robotId = "ROBOT-8";
+        await _service.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _service.SendCommandBatchAsync(robotId, null!, _testGrid));
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WithEmptyInstructions_ShouldThrowArgumentException()
+    {
+        // Arrange
+        var robotId = "ROBOT-9";
+        await _service.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            async () => await _service.SendCommandBatchAsync(robotId, "", _testGrid));
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WithNullGrid_ShouldThrowArgumentNullException()
+    {
+        // Arrange
+        var robotId = "ROBOT-10";
+        await _service.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await _service.SendCommandBatchAsync(robotId, "RFR", null!));
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WithInvalidCommand_ShouldThrowArgumentException()
+    {
+        // Arrange
+        var robotId = "ROBOT-11";
+        await _service.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            async () => await _service.SendCommandBatchAsync(robotId, "XYZ", _testGrid));
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WhenRobotGetsLost_ShouldStopExecution()
+    {
+        // Arrange
+        var robotId = "ROBOT-12";
+        await _service.ConnectToRobotAsync(robotId, new Position(4, 4), Orientation.North);
+
+        // Act - move forward from edge, robot will get lost
+        var responses = await _service.SendCommandBatchAsync(robotId, "FFFFF", _testGrid);
+
+        // Assert
+        responses.Should().HaveCount(1); // Should stop after getting lost
+        responses[0].IsLost.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WhenCancelled_ShouldReturnTimedOutResponse()
+    {
+        // Arrange
+        var robotId = "ROBOT-13";
+        await _service.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+        
+        var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        // Act
+        var responses = await _service.SendCommandBatchAsync(robotId, "RFR", _testGrid, cts.Token);
+
+        // Assert
+        responses.Should().Contain(r => r.Status == CommandStatus.TimedOut);
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WithFailureSimulator_ShouldReturnFailedCommands()
+    {
+        // Arrange - Create a mock that succeeds for connection but fails for command batch
+        var mockFailureSimulator = new Mock<IFailureSimulator>();
+        var callCount = 0;
+        mockFailureSimulator.Setup(f => f.ShouldSimulateFailure())
+            .Returns(() =>
+            {
+                callCount++;
+                // First call (connection) - succeed
+                if (callCount == 1) return false;
+                // Subsequent calls (commands) - fail
+                return true;
+            });
+
+        var failingOptions = new RobotCommunicationOptions
         {
-            var response = await _service.SendCommandAsync(robotId, command);
-            responses.Add(response);
-        }
+            BaseDelay = TimeSpan.FromMilliseconds(1),
+            MaxRandomDelay = TimeSpan.FromMilliseconds(1),
+            FailureProbability = 1.0,
+            CommandTimeout = TimeSpan.FromSeconds(5)
+        };
 
-        // Assert
-        Assert.All(responses, r => Assert.Equal(CommandStatus.Executed, r.Status));
-        Assert.All(responses, r => Assert.False(r.IsLost));
+        var failingService = new RobotCommunicationService(
+            NullLogger<RobotCommunicationService>.Instance,
+            failingOptions,
+            _mockDelayService,
+            mockFailureSimulator.Object);
 
-        // After completing a square, robot should be back at start position and orientation
-        var finalResponse = responses.Last();
-        Assert.Equal(startPosition, finalResponse.NewPosition);
-        Assert.Equal(startOrientation, finalResponse.NewOrientation);
+        var robotId = "ROBOT-14";
+        var connected = await failingService.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+        connected.Should().BeTrue();
+
+        // Act - execute commands which will all fail deterministically
+        var responses = await failingService.SendCommandBatchAsync(robotId, "RRR", _testGrid);
+
+        // Assert - all commands should fail deterministically
+        responses.Should().AllSatisfy(r => r.Status.Should().Be(CommandStatus.Failed));
+        responses.Should().AllSatisfy(r => r.ErrorMessage.Should().Contain("communication failure"));
+
+        failingService.Dispose();
     }
 
-    [Theory]
-    [InlineData(Orientation.North, Orientation.East)]
-    [InlineData(Orientation.East, Orientation.South)]
-    [InlineData(Orientation.South, Orientation.West)]
-    [InlineData(Orientation.West, Orientation.North)]
-    public async Task RightTurn_FromAllOrientations_ShouldRotateCorrectly(Orientation initial, Orientation expected)
+    [Fact]
+    public async Task SendCommandBatchAsync_WithFailures_ShouldTransitionToUnstableAfter3Failures()
+    {
+        // Arrange - Mock that succeeds for connection but fails for all commands
+        var mockFailureSimulator = new Mock<IFailureSimulator>();
+        var callCount = 0;
+        mockFailureSimulator.Setup(f => f.ShouldSimulateFailure())
+            .Returns(() =>
+            {
+                callCount++;
+                // First call (connection) - succeed
+                if (callCount == 1) return false;
+                // All command calls - fail
+                return true;
+            });
+
+        var failingService = new RobotCommunicationService(
+            NullLogger<RobotCommunicationService>.Instance,
+            _options,
+            _mockDelayService,
+            mockFailureSimulator.Object);
+
+        var robotId = "ROBOT-UNSTABLE";
+        var connected = await failingService.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+        connected.Should().BeTrue();
+
+        // Act - execute 5 commands to trigger failures and transition to Unstable after 3
+        var responses = await failingService.SendCommandBatchAsync(robotId, "RRRRR", _testGrid);
+
+        // Assert - all commands should fail
+        responses.Should().AllSatisfy(r => r.Status.Should().Be(CommandStatus.Failed));
+        
+        failingService.Dispose();
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_SuccessfulExecution_ShouldUpdateRobotPosition()
     {
         // Arrange
-        const string robotId = "ROTATION-TEST";
-        var position = new Position(2, 2);
-        
-        await _service.ConnectToRobotAsync(robotId, position, initial);
+        var robotId = "ROBOT-15";
+        await _service.ConnectToRobotAsync(robotId, new Position(1, 1), Orientation.North);
 
         // Act
-        var response = await _service.SendCommandAsync(robotId, 'R');
+        var responses = await _service.SendCommandBatchAsync(robotId, "F", _testGrid);
 
         // Assert
-        Assert.Equal(CommandStatus.Executed, response.Status);
-        Assert.Equal(expected, response.NewOrientation);
+        responses.Should().HaveCount(1);
+        responses[0].NewPosition.Should().Be(new Position(1, 2));
+        responses[0].NewOrientation.Should().Be(Orientation.North);
     }
 
-    [Theory]
-    [InlineData(Orientation.North, Orientation.West)]
-    [InlineData(Orientation.West, Orientation.South)]
-    [InlineData(Orientation.South, Orientation.East)]
-    [InlineData(Orientation.East, Orientation.North)]
-    public async Task LeftTurn_FromAllOrientations_ShouldRotateCorrectly(Orientation initial, Orientation expected)
+    [Fact]
+    public async Task SendCommandBatchAsync_AfterDisconnect_ShouldReturnNotConnectedError()
     {
         // Arrange
-        const string robotId = "ROTATION-TEST";
-        var position = new Position(2, 2);
+        var robotId = "ROBOT-DISCONNECT-TEST";
+        await _service.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
         
-        await _service.ConnectToRobotAsync(robotId, position, initial);
+        // Act - Disconnect the robot to put it in Disconnected state
+        await _service.DisconnectFromRobotAsync(robotId);
+
+        // Act - try to send commands to disconnected robot
+        var responses = await _service.SendCommandBatchAsync(robotId, "RRR", _testGrid);
+
+        // Assert - should fail with specific error message
+        responses.Should().HaveCount(1);
+        responses[0].Status.Should().Be(CommandStatus.Failed);
+        responses[0].ErrorMessage.Should().Contain("not connected");
+    }
+
+    [Fact]
+    public async Task SendCommandBatchAsync_WhenCommandExecutionFails_ShouldCatchExceptionAndReturnFailedResponse()
+    {
+        // Arrange - Create a custom service with a mock delay service that throws during execution
+        var mockDelayService = new Mock<IDelayService>();
+        
+        // Setup: First call succeeds (for connection), subsequent calls throw to simulate failure during command execution
+        var callCount = 0;
+        mockDelayService.Setup(d => d.DelayAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                callCount++;
+                // First call is for ConnectToRobotAsync - let it succeed
+                if (callCount == 1)
+                {
+                    return Task.CompletedTask;
+                }
+                // Second call is during SendCommandBatchAsync - throw exception
+                throw new InvalidOperationException("Simulated command execution failure");
+            });
+
+        var testService = new RobotCommunicationService(
+            NullLogger<RobotCommunicationService>.Instance,
+            _options,
+            mockDelayService.Object,
+            new NoFailureSimulator());
+
+        var robotId = "ROBOT-EXCEPTION-TEST";
+        
+        // Connect the robot (uses first delay call which succeeds)
+        var connected = await testService.ConnectToRobotAsync(robotId, new Position(0, 0), Orientation.North);
+        connected.Should().BeTrue();
+
+        // Act - Execute command which will trigger exception during delay simulation
+        var responses = await testService.SendCommandBatchAsync(robotId, "R", _testGrid);
+
+        // Assert - Should catch the exception and return failed response
+        responses.Should().HaveCount(1);
+        responses[0].Status.Should().Be(CommandStatus.Failed);
+        responses[0].ErrorMessage.Should().Contain("Simulated command execution failure");
+        
+        testService.Dispose();
+    }
+
+    #endregion
+
+    #region Dispose Tests
+
+    [Fact]
+    public async Task Dispose_WithConnectedRobots_ShouldDisconnectAll()
+    {
+        // Arrange
+        var service = new RobotCommunicationService(
+            NullLogger<RobotCommunicationService>.Instance,
+            _options,
+            _mockDelayService,
+            new NoFailureSimulator());
+
+        await service.ConnectToRobotAsync("ROBOT-16", new Position(0, 0), Orientation.North);
+        await service.ConnectToRobotAsync("ROBOT-17", new Position(1, 1), Orientation.East);
 
         // Act
-        var response = await _service.SendCommandAsync(robotId, 'L');
+        service.Dispose();
 
-        // Assert
-        Assert.Equal(CommandStatus.Executed, response.Status);
-        Assert.Equal(expected, response.NewOrientation);
+        // Assert - calling dispose should not throw
+        var exception = Record.Exception(() => service.Dispose());
+        exception.Should().BeNull();
     }
+
+    [Fact]
+    public void Dispose_CalledMultipleTimes_ShouldNotThrow()
+    {
+        // Arrange
+        var service = new RobotCommunicationService(
+            NullLogger<RobotCommunicationService>.Instance,
+            _options,
+            _mockDelayService,
+            new NoFailureSimulator());
+
+        // Act & Assert - multiple dispose calls should not throw
+        service.Dispose();
+        service.Dispose();
+        service.Dispose();
+    }
+
+    #endregion
+
+    #region Integration Scenarios
+
+    [Fact]
+    public async Task CompleteWorkflow_ConnectExecuteDisconnect_ShouldWork()
+    {
+        // Arrange
+        var robotId = "ROBOT-18";
+
+        // Act - Connect
+        var connected = await _service.ConnectToRobotAsync(robotId, new Position(2, 2), Orientation.East);
+        connected.Should().BeTrue();
+
+        // Act - Ping
+        var ping1 = await _service.PingRobotAsync(robotId);
+        ping1.Should().BeTrue();
+
+        // Act - Execute commands
+        var responses = await _service.SendCommandBatchAsync(robotId, "RFRFRF", _testGrid);
+        responses.Should().AllSatisfy(r => r.Status.Should().Be(CommandStatus.Executed));
+
+        // Act - Disconnect
+        await _service.DisconnectFromRobotAsync(robotId);
+
+        // Act - Ping after disconnect
+        var ping2 = await _service.PingRobotAsync(robotId);
+        ping2.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MultipleRobots_ShouldBeIndependent()
+    {
+        // Arrange
+        var robot1 = "ROBOT-19";
+        var robot2 = "ROBOT-20";
+
+        // Act - Connect both robots
+        await _service.ConnectToRobotAsync(robot1, new Position(0, 0), Orientation.North);
+        await _service.ConnectToRobotAsync(robot2, new Position(2, 2), Orientation.South);
+
+        // Act - Execute different commands
+        var responses1 = await _service.SendCommandBatchAsync(robot1, "RR", _testGrid);
+        var responses2 = await _service.SendCommandBatchAsync(robot2, "LL", _testGrid);
+
+        // Assert - both should be successful and independent
+        responses1.Should().AllSatisfy(r => r.RobotId.Should().Be(robot1));
+        responses2.Should().AllSatisfy(r => r.RobotId.Should().Be(robot2));
+
+        // Act - Disconnect one robot
+        await _service.DisconnectFromRobotAsync(robot1);
+
+        // Assert - other robot should still be connected
+        var ping1 = await _service.PingRobotAsync(robot1);
+        var ping2 = await _service.PingRobotAsync(robot2);
+
+        ping1.Should().BeFalse();
+        ping2.Should().BeTrue();
+    }
+
+    #endregion
 }

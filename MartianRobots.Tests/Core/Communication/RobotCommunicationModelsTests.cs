@@ -1,5 +1,3 @@
-using MartianRobots.Core.Communication;
-
 namespace MartianRobots.Tests.Core.Communication;
 
 public class RobotCommunicationModelsTests
@@ -48,54 +46,6 @@ public class RobotCommunicationModelsTests
         Assert.Equal(ConnectionState.Connected, robot.ConnectionState);
         Assert.Equal("Test error", robot.LastError);
         Assert.Equal(5, robot.FailedCommandCount);
-    }
-
-    [Fact]
-    public void RobotCommand_DefaultValues_ShouldBeSetCorrectly()
-    {
-        // Act
-        var command = new RobotCommand();
-
-        // Assert
-        Assert.NotEqual(string.Empty, command.CommandId); // Should have GUID
-        Assert.Equal(string.Empty, command.RobotId);
-        Assert.Equal(default(char), command.Instruction);
-        Assert.Equal(CommandStatus.Pending, command.Status);
-        Assert.Null(command.ErrorMessage);
-        Assert.Null(command.AcknowledgedAt);
-        Assert.True((DateTime.UtcNow - command.SentAt).TotalSeconds < 1); // Should be recent
-    }
-
-    [Fact]
-    public void RobotCommand_InitWithValues_ShouldSetPropertiesCorrectly()
-    {
-        // Arrange
-        const string commandId = "test-command-123";
-        const string robotId = "MARS-ROVER-2";
-        const char instruction = 'F';
-        var sentAt = DateTime.UtcNow.AddMinutes(-1);
-        var acknowledgedAt = DateTime.UtcNow;
-
-        // Act
-        var command = new RobotCommand
-        {
-            CommandId = commandId,
-            RobotId = robotId,
-            Instruction = instruction,
-            SentAt = sentAt,
-            Status = CommandStatus.Executed,
-            ErrorMessage = "Test error",
-            AcknowledgedAt = acknowledgedAt
-        };
-
-        // Assert
-        Assert.Equal(commandId, command.CommandId);
-        Assert.Equal(robotId, command.RobotId);
-        Assert.Equal(instruction, command.Instruction);
-        Assert.Equal(sentAt, command.SentAt);
-        Assert.Equal(CommandStatus.Executed, command.Status);
-        Assert.Equal("Test error", command.ErrorMessage);
-        Assert.Equal(acknowledgedAt, command.AcknowledgedAt);
     }
 
     [Fact]
@@ -169,19 +119,15 @@ public class RobotCommunicationModelsTests
     }
 
     [Theory]
-    [InlineData(CommandStatus.Pending)]
-    [InlineData(CommandStatus.Acknowledged)]
     [InlineData(CommandStatus.Executed)]
     [InlineData(CommandStatus.Failed)]
     [InlineData(CommandStatus.TimedOut)]
     public void CommandStatus_AllValues_ShouldBeValid(CommandStatus status)
     {
         // Act
-        var command = new RobotCommand { Status = status };
         var response = new CommandResponse { Status = status };
 
         // Assert
-        Assert.Equal(status, command.Status);
         Assert.Equal(status, response.Status);
     }
 

@@ -1,4 +1,4 @@
-namespace MartianRobots.Core.Communication;
+namespace MartianRobots.Abstractions.Models;
 
 /// <summary>
 /// Represents a robot instance that can be communicated with
@@ -28,26 +28,10 @@ public enum ConnectionState
 }
 
 /// <summary>
-/// Command sent to a robot with acknowledgment capability
-/// </summary>
-public sealed class RobotCommand
-{
-    public string CommandId { get; init; } = Guid.NewGuid().ToString();
-    public string RobotId { get; init; } = string.Empty;
-    public char Instruction { get; init; }
-    public DateTime SentAt { get; init; } = DateTime.UtcNow;
-    public CommandStatus Status { get; set; } = CommandStatus.Pending;
-    public string? ErrorMessage { get; set; }
-    public DateTime? AcknowledgedAt { get; set; }
-}
-
-/// <summary>
 /// Status of a command sent to a robot
 /// </summary>
 public enum CommandStatus
 {
-    Pending,
-    Acknowledged,
     Executed,
     Failed,
     TimedOut

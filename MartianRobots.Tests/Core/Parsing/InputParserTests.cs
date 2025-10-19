@@ -11,7 +11,7 @@ public class InputParserTests
     [InlineData("  10   20  ", 10, 20)] // With whitespace
     public void ParseGrid_WithValidInput_ShouldReturnCorrectGrid(string gridLine, int expectedMaxX, int expectedMaxY)
     {
-        var grid = InputParser.ParseGrid(gridLine);
+        var grid = InputParser.ParseGrid(gridLine, null);
 
         grid.IsValidPosition(new Position(expectedMaxX, expectedMaxY)).Should().BeTrue();
         grid.IsValidPosition(new Position(expectedMaxX + 1, expectedMaxY)).Should().BeFalse();
@@ -24,7 +24,7 @@ public class InputParserTests
     [InlineData("5 3 1")]
     public void ParseGrid_WithInvalidInput_ShouldThrowException(string gridLine)
     {
-        var action = () => InputParser.ParseGrid(gridLine);
+        var action = () => InputParser.ParseGrid(gridLine, null);
         action.Should().Throw<ArgumentException>();
     }
 
@@ -37,7 +37,7 @@ public class InputParserTests
     public void ParseRobot_WithValidInput_ShouldReturnCorrectRobot(
         string positionLine, int expectedX, int expectedY, Orientation expectedOrientation)
     {
-        var robot = InputParser.ParseRobot(positionLine);
+        var robot = InputParser.ParseRobot(positionLine, null);
 
         robot.Position.Should().Be(new Position(expectedX, expectedY));
         robot.Orientation.Should().Be(expectedOrientation);
@@ -52,7 +52,7 @@ public class InputParserTests
     [InlineData("1 2 X")]
     public void ParseRobot_WithInvalidInput_ShouldThrowException(string positionLine)
     {
-        var action = () => InputParser.ParseRobot(positionLine);
+        var action = () => InputParser.ParseRobot(positionLine, null);
         action.Should().Throw<ArgumentException>();
     }
 
@@ -62,7 +62,7 @@ public class InputParserTests
         // This test ensures that ParseGrid calls the validator
         // We can verify this by checking that invalid input throws an exception
 
-        var action = () => InputParser.ParseGrid("invalid");
+        var action = () => InputParser.ParseGrid("invalid", null);
         action.Should().Throw<ArgumentException>();
     }
 
@@ -72,7 +72,7 @@ public class InputParserTests
         // This test ensures that ParseRobot calls the validator
         // We can verify this by checking that invalid input throws an exception
 
-        var action = () => InputParser.ParseRobot("invalid");
+        var action = () => InputParser.ParseRobot("invalid", null);
         action.Should().Throw<ArgumentException>();
     }
 
@@ -82,7 +82,7 @@ public class InputParserTests
         // Note: This tests that even if the parsing succeeds, 
         // the MarsGrid constructor will validate the values
 
-        var action = () => InputParser.ParseGrid("-1 5");
+        var action = () => InputParser.ParseGrid("-1 5", null);
         action.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -92,7 +92,7 @@ public class InputParserTests
         // Note: This tests that even if the parsing succeeds, 
         // the MarsGrid constructor will validate the values
 
-        var action = () => InputParser.ParseGrid("51 5");
+        var action = () => InputParser.ParseGrid("51 5", null);
         action.Should().Throw<ArgumentOutOfRangeException>();
     }
 
@@ -101,7 +101,7 @@ public class InputParserTests
     [InlineData("1 2 northeast")] // too long
     public void ParseRobot_WithInvalidOrientation_ShouldThrow(string positionLine)
     {
-        var action = () => InputParser.ParseRobot(positionLine);
+        var action = () => InputParser.ParseRobot(positionLine, null);
         action.Should().Throw<ArgumentException>();
     }
 
@@ -111,7 +111,7 @@ public class InputParserTests
         // Arrange
         var positionLine = "3 4 E";
 
-        var robot = InputParser.ParseRobot(positionLine);
+        var robot = InputParser.ParseRobot(positionLine, null);
 
         robot.Position.X.Should().Be(3);
         robot.Position.Y.Should().Be(4);
