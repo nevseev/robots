@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MartianRobots.Core.Resilience;
@@ -192,4 +193,120 @@ public class ResiliencePipelineProviderTests
         result.Should().Be("Success");
         attemptCount.Should().Be(3); // Succeeded on 3rd attempt
     }
+
+    [Fact]
+    public async Task Pipeline_WithRetry_ShouldLogWarning()
+    {
+        // Arrange
+        var options = Options.Create(new RobotCommunicationOptions
+        {
+            BaseDelay = TimeSpan.FromMilliseconds(1), // Fast for tests
+            MaxRetryAttempts = 2
+        });
+        var mockLogger = new Mock<ILogger<ResiliencePipelineProvider>>();
+        
+        // Setup IsEnabled to return true for Warning level to cover all branches
+        mockLogger.Setup(x => x.IsEnabled(LogLevel.Warning)).Returns(true);
+        
+        var provider = new ResiliencePipelineProvider(options, mockLogger.Object);
+        var attemptCount = 0;
+
+        // Act & Assert - Will retry and eventually fail
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await provider.Pipeline.ExecuteAsync(async ct =>
+            {
+                attemptCount++;
+                await Task.CompletedTask;
+                throw new InvalidOperationException("Test error for retry logging");
+            });
+        });
+
+        // Assert - Verify retry logging occurred (covers the OnRetry callback branch)
+        attemptCount.Should().Be(3); // Initial + 2 retries
+
+        // Verify LogWarning was called for the retries
+        mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Retry attempt")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeast(2)); // Should log for each retry
+    }
+
+    [Fact]
+    public async Task Pipeline_WithRetryAndExceptionWithNullMessage_ShouldLogWarning()
+    {
+        // Arrange
+        var options = Options.Create(new RobotCommunicationOptions
+        {
+            BaseDelay = TimeSpan.FromMilliseconds(1),
+            MaxRetryAttempts = 1
+        });
+        var mockLogger = new Mock<ILogger<ResiliencePipelineProvider>>();
+        var provider = new ResiliencePipelineProvider(options, mockLogger.Object);
+
+        // Act & Assert - Create exception with empty/null message scenario
+        await Assert.ThrowsAsync<Exception>(async () =>
+        {
+            await provider.Pipeline.ExecuteAsync(async ct =>
+            {
+                await Task.CompletedTask;
+                // Use base Exception which might have null message behavior
+                throw new Exception();
+            });
+        });
+
+        // Verify retry logging still works even with null/empty message
+        mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Retry attempt")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task Pipeline_WithProductionDelay_ShouldRetryAndLog()
+    {
+        // Arrange - Use production delay (>= 100ms) to test the else branch in constructor
+        var options = Options.Create(new RobotCommunicationOptions
+        {
+            BaseDelay = TimeSpan.FromSeconds(2), // Production delay
+            MaxRetryAttempts = 1
+        });
+        var mockLogger = new Mock<ILogger<ResiliencePipelineProvider>>();
+        mockLogger.Setup(x => x.IsEnabled(LogLevel.Warning)).Returns(true);
+        
+        var provider = new ResiliencePipelineProvider(options, mockLogger.Object);
+        var attemptCount = 0;
+
+        // Act & Assert - Will retry with production delay
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await provider.Pipeline.ExecuteAsync(async ct =>
+            {
+                attemptCount++;
+                await Task.CompletedTask;
+                throw new InvalidOperationException("Production delay test");
+            });
+        });
+
+        // Verify retry occurred and logging happened
+        attemptCount.Should().Be(2); // Initial + 1 retry
+        
+        mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Retry attempt")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
 }

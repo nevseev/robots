@@ -8,7 +8,7 @@ namespace MartianRobots.Console;
 /// <summary>
 /// Application that runs robot simulations using the Mars Robot Communication System
 /// </summary>
-internal sealed class RobotDemo(IResilientRobotController controller, ILogger<RobotDemo> logger)
+internal sealed class RobotDemo(IResilientRobotController controller, ILogger<RobotDemo> logger) : IRobotDemo
 {
     public async Task RunAsync(string? inputFile = null)
     {

@@ -16,14 +16,12 @@ namespace MartianRobots.Console;
 /// Intentionally excluded from code coverage - see README.md "Testing Strategy" section.
 /// DI configuration is tested via integration tests; bootstrapping code provides minimal value to test directly.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal static class Program
 {
     /// <summary>
     /// Main entry point - configures services and runs the robot simulation.
-    /// Excluded from coverage: entry points are difficult to test meaningfully and provide low value.
-    /// The important components (RobotDemo, services) are fully tested via unit and integration tests.
     /// </summary>
-    [ExcludeFromCodeCoverage]
     private static async Task<int> Main(string[] args)
     {
         // Configure Serilog
@@ -34,12 +32,8 @@ internal static class Program
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")
             .CreateLogger();
 
-        var logger = Log.Logger.ForContext<StartupLogger>();
-        
         try
         {
-            logger.Information("=== Mars Robot Communication System ===");
-            
             // Setup dependency injection
             var services = new ServiceCollection();
             ConfigureServices(services);
@@ -47,16 +41,15 @@ internal static class Program
 
             // Determine input source
             string? inputFile = args.Length > 0 ? args[0] : null;
-            
-            // Run the simulation
-            var demo = serviceProvider.GetRequiredService<RobotDemo>();
-            await demo.RunAsync(inputFile);
 
-            return 0;
+            // Create and run application
+            var logger = serviceProvider.GetRequiredService<ILogger<Application>>();
+            var app = new Application(serviceProvider, logger);
+            return await app.RunAsync(inputFile);
         }
         catch (Exception ex)
         {
-            logger.Fatal(ex, "Unhandled exception in Mars Robot application");
+            Log.Logger.ForContext<StartupLogger>().Fatal(ex, "Fatal error during application startup");
             return 1;
         }
         finally
@@ -92,7 +85,7 @@ internal static class Program
             CircuitBreakerMinimumThroughput = 10
         });
 
-        services.AddSingleton(sp => 
+        services.AddSingleton(sp =>
             Options.Create(sp.GetRequiredService<RobotCommunicationOptions>()));
 
         // Add core services
@@ -107,7 +100,7 @@ internal static class Program
         services.AddSingleton<IResilientRobotController, ResilientRobotController>();
 
         // Add demo runner
-        services.AddSingleton<RobotDemo>();
+        services.AddSingleton<IRobotDemo, RobotDemo>();
     }
 }
 

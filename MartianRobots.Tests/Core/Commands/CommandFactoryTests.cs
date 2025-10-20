@@ -1,4 +1,5 @@
 using MartianRobots.Core.Commands;
+using Microsoft.Extensions.Logging;
 
 namespace MartianRobots.Tests.Core.Commands;
 
@@ -106,5 +107,70 @@ public class CommandFactoryTests
         commands[0].Should().BeOfType<TurnLeftCommand>();
         commands[1].Should().BeOfType<TurnLeftCommand>();
         commands[2].Should().BeOfType<MoveForwardCommand>();
+    }
+
+    [Fact]
+    public void GetCommand_WithLogger_ShouldLogDebugMessages()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger<CommandFactoryTests>>();
+
+        // Act
+        var command = CommandFactory.GetCommand('L', mockLogger.Object);
+
+        // Assert
+        command.Should().BeOfType<TurnLeftCommand>();
+        
+        // Verify logging occurred (covers the logger != null branches)
+        mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Creating command for instruction")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+
+        mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Successfully retrieved")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public void CreateCommands_WithLogger_ShouldLogDebugMessages()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger<CommandFactoryTests>>();
+        var instructions = "RF";
+
+        // Act
+        var commands = CommandFactory.CreateCommands(instructions, mockLogger.Object);
+
+        // Assert
+        commands.Should().HaveCount(2);
+        
+        // Verify logging occurred for the sequence
+        mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Creating commands for instruction string")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+
+        mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Successfully created") && v.ToString()!.Contains("commands from instruction string")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 }

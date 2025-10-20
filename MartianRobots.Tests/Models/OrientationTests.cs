@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace MartianRobots.Tests.Models;
 
 public class OrientationTests
@@ -86,5 +88,53 @@ public class OrientationTests
 
         var result = original.TurnRight().TurnRight().TurnRight().TurnRight();
         result.Should().Be(original);
+    }
+
+    [Fact]
+    public void ToChar_WithInvalidEnumValue_ShouldThrowUnreachableException()
+    {
+        // Arrange - cast invalid int to Orientation enum
+        var invalidOrientation = (Orientation)999;
+
+        // Act & Assert
+        var action = () => invalidOrientation.ToChar();
+        action.Should().Throw<UnreachableException>()
+            .WithMessage("*Invalid orientation: 999*");
+    }
+
+    [Fact]
+    public void TurnLeft_WithInvalidEnumValue_ShouldThrowUnreachableException()
+    {
+        // Arrange
+        var invalidOrientation = (Orientation)(-1);
+
+        // Act & Assert
+        var action = () => invalidOrientation.TurnLeft();
+        action.Should().Throw<UnreachableException>()
+            .WithMessage("*Invalid orientation*");
+    }
+
+    [Fact]
+    public void TurnRight_WithInvalidEnumValue_ShouldThrowUnreachableException()
+    {
+        // Arrange
+        var invalidOrientation = (Orientation)100;
+
+        // Act & Assert
+        var action = () => invalidOrientation.TurnRight();
+        action.Should().Throw<UnreachableException>()
+            .WithMessage("*Invalid orientation*");
+    }
+
+    [Fact]
+    public void GetMovementDelta_WithInvalidEnumValue_ShouldThrowUnreachableException()
+    {
+        // Arrange
+        var invalidOrientation = (Orientation)(-99);
+
+        // Act & Assert
+        var action = () => invalidOrientation.GetMovementDelta();
+        action.Should().Throw<UnreachableException>()
+            .WithMessage("*Invalid orientation*");
     }
 }
