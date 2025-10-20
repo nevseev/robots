@@ -2,6 +2,10 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Serilog;
 using MartianRobots.Abstractions.Models;
 using MartianRobots.Abstractions.Services;
@@ -87,6 +91,43 @@ internal static class Program
 
         services.AddSingleton(sp =>
             Options.Create(sp.GetRequiredService<RobotCommunicationOptions>()));
+
+        // Add OpenTelemetry telemetry
+        services.AddSingleton<RobotCommunicationTelemetry>();
+
+        // Configure OpenTelemetry
+        var otlpEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT") ?? "http://localhost:4317";
+        var useOtlp = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT"));
+        
+        services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource
+                .AddService(
+                    serviceName: "MartianRobots",
+                    serviceVersion: "1.0.0",
+                    serviceInstanceId: Environment.MachineName))
+            .WithTracing(tracing => tracing
+                .AddSource(RobotCommunicationTelemetry.ActivitySourceName)
+                .SetSampler(new AlwaysOnSampler())
+                .AddConsoleExporter()
+                .AddOtlpExporter(options =>
+                {
+                    options.Endpoint = new Uri(otlpEndpoint);
+                    options.Protocol = OtlpExportProtocol.Grpc;
+                })
+                .SetErrorStatusOnException())
+            .WithMetrics(metrics => metrics
+                .AddMeter(RobotCommunicationTelemetry.MeterName)
+                .AddRuntimeInstrumentation()
+                .AddConsoleExporter((exporterOptions, metricReaderOptions) =>
+                {
+                    metricReaderOptions.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 10000;
+                })
+                .AddOtlpExporter((options, metricReaderOptions) =>
+                {
+                    options.Endpoint = new Uri(otlpEndpoint);
+                    options.Protocol = OtlpExportProtocol.Grpc;
+                    metricReaderOptions.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = 10000;
+                }));
 
         // Add core services
         services.AddSingleton<IDelayService, DelayService>();

@@ -1,8 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MartianRobots.Console;
-using MartianRobots.Core.Communication;
-using Moq;
 
 namespace MartianRobots.Tests.Console;
 

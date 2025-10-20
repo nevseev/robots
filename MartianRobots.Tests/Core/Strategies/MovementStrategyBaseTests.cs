@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using MartianRobots.Core.Strategies;
-using Moq;
 
 namespace MartianRobots.Tests.Core.Strategies;
 

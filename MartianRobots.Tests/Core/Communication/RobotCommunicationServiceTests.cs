@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using MartianRobots.Core.Communication;
 using MartianRobots.Core.Services;
 using MartianRobots.Tests.Mocks;

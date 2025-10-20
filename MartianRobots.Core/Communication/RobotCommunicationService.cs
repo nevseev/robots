@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace MartianRobots.Core.Communication;
 
@@ -37,15 +38,20 @@ public sealed class RobotCommunicationService(
     ILogger<RobotCommunicationService> logger,
     RobotCommunicationOptions options,
     IDelayService delayService,
-    IFailureSimulator failureSimulator) : IRobotCommunicationService, IDisposable
+    IFailureSimulator failureSimulator,
+    RobotCommunicationTelemetry? telemetry = null) : IRobotCommunicationService, IDisposable
 {
     private readonly ConcurrentDictionary<string, RobotInstance> _robots = new();
     private readonly Random _random = new();
+    private readonly RobotCommunicationTelemetry? _telemetry = telemetry;
     private bool _disposed;
 
     public async Task<bool> ConnectToRobotAsync(string robotId, Position initialPosition, Orientation initialOrientation, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(robotId);
+        
+        using var activity = _telemetry?.StartConnectionActivity(robotId, initialPosition, initialOrientation);
+        var startTime = DateTime.UtcNow;
         
         logger.LogInformation("Attempting to connect to robot {RobotId} at position {Position} facing {Orientation}",
             robotId, initialPosition, initialOrientation);
@@ -59,6 +65,9 @@ public sealed class RobotCommunicationService(
             if (failureSimulator.ShouldSimulateFailure())
             {
                 logger.LogWarning("Simulated connection failure for robot {RobotId}", robotId);
+                var failureDuration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                _telemetry?.RecordConnectionFailure(robotId, failureDuration, "Simulated connection failure");
+                activity?.SetStatus(ActivityStatusCode.Error, "Simulated connection failure");
                 return false;
             }
 
@@ -76,16 +85,25 @@ public sealed class RobotCommunicationService(
             _robots[robotId] = robot;
 
             logger.LogInformation("Successfully connected to robot {RobotId}", robotId);
+            var successDuration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            _telemetry?.RecordConnectionSuccess(robotId, successDuration);
+            activity?.SetStatus(ActivityStatusCode.Ok);
             return true;
         }
         catch (OperationCanceledException)
         {
             logger.LogWarning("Connection to robot {RobotId} was cancelled", robotId);
+            var cancelDuration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            _telemetry?.RecordConnectionFailure(robotId, cancelDuration, "Operation cancelled");
+            activity?.SetStatus(ActivityStatusCode.Error, "Operation cancelled");
             throw;
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to connect to robot {RobotId}: {Error}", robotId, ex.Message);
+            var errorDuration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            _telemetry?.RecordConnectionFailure(robotId, errorDuration, ex.Message);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return false;
         }
     }
@@ -94,6 +112,8 @@ public sealed class RobotCommunicationService(
     {
         ArgumentException.ThrowIfNullOrEmpty(robotId);
 
+        using var activity = _telemetry?.StartDisconnectActivity(robotId);
+        
         logger.LogInformation("Disconnecting from robot {RobotId}", robotId);
 
         // Simulate disconnection delay
@@ -103,10 +123,12 @@ public sealed class RobotCommunicationService(
         {
             robot.ConnectionState = ConnectionState.Disconnected;
             logger.LogInformation("Successfully disconnected from robot {RobotId}", robotId);
+            activity?.SetStatus(ActivityStatusCode.Ok);
         }
         else
         {
             logger.LogWarning("Robot {RobotId} was not connected", robotId);
+            activity?.SetStatus(ActivityStatusCode.Error, "Robot was not connected");
         }
     }
 
@@ -116,6 +138,9 @@ public sealed class RobotCommunicationService(
         ArgumentException.ThrowIfNullOrEmpty(instructions);
         ArgumentNullException.ThrowIfNull(grid);
 
+        using var batchActivity = _telemetry?.StartBatchActivity(robotId, instructions.Length);
+        var batchStartTime = DateTime.UtcNow;
+        
         logger.LogInformation("Sending command batch of {Count} instructions to robot {RobotId}: {Instructions}",
             instructions.Length, robotId, instructions);
 
@@ -147,10 +172,12 @@ public sealed class RobotCommunicationService(
         for (int i = 0; i < commands.Count; i++)
         {
             var command = commands[i];
-            var instruction = instructions[i];
+            var instruction = instructions[i].ToString();
             var commandId = Guid.NewGuid().ToString();
             var startTime = DateTime.UtcNow;
 
+            using var commandActivity = _telemetry?.StartCommandActivity(robotId, instruction, i);
+            
             try
             {
                 // Simulate network delay
@@ -161,6 +188,9 @@ public sealed class RobotCommunicationService(
                 {
                     logger.LogWarning("Robot {RobotId} is in state {State}, stopping batch execution",
                         robotId, robot.ConnectionState);
+                    
+                    var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                    _telemetry?.RecordCommandFailure(robotId, instruction, duration, $"Robot in invalid state: {robot.ConnectionState}");
                     
                     responses.Add(new CommandResponse
                     {
@@ -185,6 +215,9 @@ public sealed class RobotCommunicationService(
 
                     logger.LogWarning("Simulated command failure for robot {RobotId}, command {Instruction}",
                         robotId, instruction);
+
+                    var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                    _telemetry?.RecordCommandFailure(robotId, instruction, duration, "Simulated communication failure");
 
                     responses.Add(new CommandResponse
                     {
@@ -215,6 +248,9 @@ public sealed class RobotCommunicationService(
                 logger.LogDebug("Command {Instruction} executed successfully on robot {RobotId}", 
                     instruction, robotId);
 
+                var cmdDuration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                _telemetry?.RecordCommandSuccess(robotId, instruction, cmdDuration, robot.Position, robot.Orientation);
+
                 responses.Add(new CommandResponse
                 {
                     CommandId = commandId,
@@ -232,6 +268,7 @@ public sealed class RobotCommunicationService(
                 {
                     logger.LogWarning("Robot {RobotId} lost during batch execution, stopping after {ExecutedCount}/{TotalCount} commands",
                         robotId, responses.Count, instructions.Length);
+                    _telemetry?.RecordRobotLost(robotId, robot.Position, robot.Orientation);
                     break;
                 }
             }
@@ -239,6 +276,9 @@ public sealed class RobotCommunicationService(
             {
                 logger.LogWarning("Batch execution cancelled for robot {RobotId} after {ExecutedCount} commands",
                     robotId, responses.Count);
+                
+                var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                _telemetry?.RecordCommandFailure(robotId, instruction, duration, "Operation cancelled");
                 
                 responses.Add(new CommandResponse
                 {
@@ -259,6 +299,9 @@ public sealed class RobotCommunicationService(
                 logger.LogError(ex, "Failed to execute command {Instruction} on robot {RobotId}: {Error}",
                     instruction, robotId, ex.Message);
 
+                var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                _telemetry?.RecordCommandFailure(robotId, instruction, duration, ex.Message);
+
                 responses.Add(new CommandResponse
                 {
                     CommandId = commandId,
@@ -272,6 +315,12 @@ public sealed class RobotCommunicationService(
         }
 
         var successCount = responses.Count(r => r.Status == CommandStatus.Executed);
+        var failureCount = responses.Count - successCount;
+        var batchDuration = (DateTime.UtcNow - batchStartTime).TotalMilliseconds;
+        
+        _telemetry?.RecordBatchCompletion(robotId, instructions.Length, successCount, failureCount, batchDuration);
+        batchActivity?.SetStatus(ActivityStatusCode.Ok);
+        
         logger.LogInformation("Batch execution completed for robot {RobotId}: {SuccessCount}/{TotalCount} commands executed successfully",
             robotId, successCount, responses.Count);
 
@@ -282,6 +331,8 @@ public sealed class RobotCommunicationService(
     {
         ArgumentException.ThrowIfNullOrEmpty(robotId);
 
+        using var activity = _telemetry?.StartPingActivity(robotId);
+        
         try
         {
             await SimulateNetworkDelayAsync(cancellationToken);
@@ -289,13 +340,17 @@ public sealed class RobotCommunicationService(
             if (_robots.TryGetValue(robotId, out var robot))
             {
                 robot.LastCommunication = DateTime.UtcNow;
-                return robot.ConnectionState == ConnectionState.Connected;
+                var isConnected = robot.ConnectionState == ConnectionState.Connected;
+                activity?.SetStatus(isConnected ? ActivityStatusCode.Ok : ActivityStatusCode.Error, $"Robot state: {robot.ConnectionState}");
+                return isConnected;
             }
 
+            activity?.SetStatus(ActivityStatusCode.Error, "Robot not found");
             return false;
         }
-        catch
+        catch (Exception ex)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return false;
         }
     }

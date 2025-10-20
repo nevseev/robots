@@ -4,12 +4,13 @@ A sophisticated .NET application for simulating Mars rover navigation with reali
 
 [![.NET Version](https://img.shields.io/badge/.NET-9.0-purple)](https://dotnet.microsoft.com/)
 [![Test Coverage](https://img.shields.io/badge/Coverage-100%25%20lines%2C%2099.5%25%20branches-brightgreen)](https://github.com/nevseev/robots)
-[![Tests](https://img.shields.io/badge/Tests-356%20passing-success)](https://github.com/nevseev/robots)
+[![Tests](https://img.shields.io/badge/Tests-361%20passing-success)](https://github.com/nevseev/robots)
 
 ## 📋 Table of Contents
 
 - [Overview](#overview)
 - [Quick Start](#quick-start)
+- [OpenTelemetry & Observability](#opentelemetry--observability)
 - [Architecture](#architecture)
 - [Design Patterns & Decisions](#design-patterns--decisions)
 - [Testing Strategy](#testing-strategy)
@@ -24,9 +25,10 @@ A sophisticated .NET application for simulating Mars rover navigation with reali
 
 This project simulates Mars rover operations with a focus on **realistic communication challenges** and **resilient system design**. It demonstrates advanced software engineering practices including:
 
-- ✅ **100% line coverage, 99.5% branch coverage** (354 comprehensive tests)
-- ⚡ **Sub-second test execution** (354 tests in ~1.5s)
+- ✅ **100% line coverage, 99.5% branch coverage** (361 comprehensive tests)
+- ⚡ **Sub-second test execution** (361 tests in ~0.8s)
 - 🔄 **Resilience patterns** with Microsoft.Extensions.Resilience (retry, circuit breaker, timeout)
+- 📊 **OpenTelemetry instrumentation** with distributed tracing and metrics
 - 🧪 **Deterministic testing** with zero conditional logic in tests
 - 🏗️ **Clean Architecture** with clear separation of concerns
 - 📦 **Dependency Injection** throughout
@@ -99,6 +101,151 @@ dotnet build MartianRobots.Core
 
 ---
 
+## 📊 OpenTelemetry & Observability
+
+The robot communication service is **fully instrumented with OpenTelemetry** for production-grade observability with distributed tracing and metrics.
+
+### What's Instrumented
+
+#### Distributed Traces (Spans)
+
+Every operation creates detailed trace spans:
+
+1. **ConnectToRobot** - Connection establishment
+   - Tags: `robot.id`, `robot.position.x`, `robot.position.y`, `robot.orientation`
+   - Records connection success/failure with retry tracking
+
+2. **DisconnectFromRobot** - Robot disconnection
+   - Tags: `robot.id`
+
+3. **SendCommandBatch** - Batch command execution
+   - Tags: `robot.id`, `command.count`, `commands.success`, `commands.failed`
+   - Parent span with child spans for each command
+
+4. **ExecuteCommand** - Individual command execution
+   - Tags: `robot.id`, `command.type`, `command.index`, position and orientation
+   - Records when robot is lost with special events
+
+5. **PingRobot** - Health check operations
+   - Tags: `robot.id`
+
+#### Metrics
+
+**Counters:**
+- `robot.connection.attempts` - Total connection attempts
+- `robot.connection.success` - Successful connections
+- `robot.connection.failures` - Failed connections (with error labels)
+- `robot.commands.executed` - Successfully executed commands
+- `robot.commands.failed` - Failed commands (with error labels)
+- `robot.lost` - Number of robots lost off the grid
+
+**Histograms (for percentile analysis):**
+- `robot.connection.duration` (ms) - Connection operation duration
+- `robot.command.duration` (ms) - Individual command execution time
+- `robot.batch.duration` (ms) - Batch operation duration
+
+**Gauges:**
+- `robot.active.count` - Number of currently connected robots (real-time)
+
+All metrics include dimensions (robot.id, command.type, status, error) for filtering and aggregation.
+
+### Running with Telemetry
+
+#### Option 1: Console Exporter (Default)
+
+Telemetry is exported to console by default:
+
+```bash
+dotnet run --project MartianRobots.Console sample-simulation.txt
+```
+
+Trace and metric data appears in console alongside application logs.
+
+#### Option 2: Jaeger (Recommended)
+
+Use the included Docker Compose setup for full observability stack:
+
+```bash
+# 1. Start Jaeger and observability stack
+docker-compose up -d
+
+# 2. Run with OTLP exporter
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+dotnet run --project MartianRobots.Console sample-simulation.txt
+
+# Or use the convenience script:
+./run-with-telemetry.sh
+```
+
+**Access points:**
+- **Jaeger UI**: http://localhost:16686 (traces)
+- **Prometheus**: http://localhost:9090 (metrics - optional)
+- **Grafana**: http://localhost:3000 (dashboards - optional, admin/admin)
+
+**View traces in Jaeger:**
+1. Open http://localhost:16686
+2. Select "MartianRobots" service
+3. Click "Find Traces"
+4. Explore distributed traces with full operation hierarchy!
+
+#### Option 3: Custom OTLP Backend
+
+Export to any OpenTelemetry-compatible backend (Honeycomb, Lightstep, New Relic, etc.):
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://your-endpoint:4317
+export OTEL_EXPORTER_OTLP_HEADERS="x-api-key=your-api-key"
+dotnet run --project MartianRobots.Console sample-simulation.txt
+```
+
+### Example Trace View
+
+Traces show the complete flow with timing:
+
+```
+SendCommandBatch (MARS-ROVER-1, 8 commands) [8.2s]
+├── ExecuteCommand (R, index=0) [502ms]
+│   └── Tags: robot.position.x=1, robot.position.y=1, robot.orientation=South
+├── ExecuteCommand (F, index=1) [518ms]
+│   └── Tags: robot.position.x=1, robot.position.y=0, robot.orientation=South
+├── ExecuteCommand (R, index=2) [495ms]
+│   └── Tags: robot.position.x=1, robot.position.y=0, robot.orientation=West
+└── ... [5 more commands]
+```
+
+### Architecture
+
+```
+RobotCommunicationService
+    └── Uses: RobotCommunicationTelemetry
+            ├── ActivitySource (for traces)
+            └── Meter (for metrics)
+
+Program.cs
+    └── Configures: OpenTelemetry SDK
+            ├── TracerProvider (ConsoleExporter + OtlpExporter)
+            └── MeterProvider (ConsoleExporter + OtlpExporter)
+```
+
+### Performance Impact
+
+- **Overhead**: ~5-10% with full tracing (AlwaysOnSampler)
+- **Batching**: Async export doesn't block operations
+- **Testing**: Telemetry is optional (nullable) - tests run at full speed
+- **Production**: Consider probabilistic sampling (10%) for high-volume scenarios
+
+### Cleanup
+
+```bash
+# Stop observability stack
+docker-compose down
+
+# Remove volumes too
+docker-compose down -v
+```
+
+---
+
 ## 🏗️ Architecture
 
 ### High-Level Design
@@ -158,8 +305,8 @@ dotnet build MartianRobots.Core
 - **Minimal logic** (marked `[ExcludeFromCodeCoverage]`)
 
 #### **MartianRobots.Tests**
-- **315 comprehensive tests**
-- **100% coverage** on Core
+- **361 comprehensive tests** (including OpenTelemetry instrumentation tests)
+- **100% coverage** on Core and Telemetry
 - **71.97% coverage** on Console (RobotDemo orchestration)
 - **Unit, integration, and structural tests**
 - **Zero conditional logic** (fully deterministic)
